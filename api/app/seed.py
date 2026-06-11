@@ -36,6 +36,7 @@ async def seed(db: AsyncSession) -> None:
         v1 = _load_v1_settings()
         nickname = v1.get("nickname", "고고조")
         db.add(User(id=USER_ID, email="josj219@gmail.com", nickname=nickname))
+        await db.flush()
         # 훈련 가능 시간은 availability_slots로 분리 — body_note에는 체형·부상 정보만
         db.add(UserProfile(
             user_id=USER_ID, height_cm=178, weight_kg=80, age=35, career_years=2,
