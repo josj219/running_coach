@@ -56,6 +56,21 @@ jobs:
           docker compose -f docker-compose.prod.yml logs --tail=50 api
           exit 1
 
+      # web(=cloudflared의 origin)이 실제로 80에서 응답하는지 + 상태/로그 덤프.
+      # 기존 health check는 api만 봐서 web 장애(502)를 못 잡았다. 진단용.
+      - name: Web reachability + diagnostics
+        if: always()
+        run: |
+          echo "===== compose ps ====="
+          docker compose -f docker-compose.prod.yml ps
+          echo "===== api -> web:80 (origin that cloudflared hits) ====="
+          docker compose -f docker-compose.prod.yml exec -T api \
+            curl -isS -m 10 http://web:80/ | head -20 || echo "❌ web:80 응답 실패"
+          echo "===== web logs (tail 40) ====="
+          docker compose -f docker-compose.prod.yml logs --tail=40 web || true
+          echo "===== cloudflared logs (tail 40) ====="
+          docker compose -f docker-compose.prod.yml logs --tail=40 cloudflared || true
+
       - name: Prune old images
         if: always()
         run: docker image prune -f
