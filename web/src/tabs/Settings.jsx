@@ -197,6 +197,7 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
   const saveProfile = async () => {
     await api.patchProfile({
       nickname: form.nickname, age: parseInt(form.age, 10) || null,
+      career_years: parseFloat(form.career_years) || null,
       height_cm: parseFloat(form.height_cm) || null, weight_kg: parseFloat(form.weight_kg) || null,
       pb_10k: form.pb_10k || null, pb_half: form.pb_half || null, pb_full: form.pb_full || null,
     });
@@ -234,7 +235,10 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
                 <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}><EditField label="키 (cm)" value={form.height_cm} mode="decimal" onChange={(v) => setForm({ ...form, height_cm: v })} /></div>
                   <div style={{ flex: 1 }}><EditField label="체중 (kg)" value={form.weight_kg} mode="decimal" onChange={(v) => setForm({ ...form, weight_kg: v })} /></div>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}><EditField label="나이" value={form.age} mode="numeric" onChange={(v) => setForm({ ...form, age: v })} /></div>
+                  <div style={{ flex: 1 }}><EditField label="러닝 경력 (년)" value={form.career_years} mode="decimal" onChange={(v) => setForm({ ...form, career_years: v })} /></div>
                 </div>
                 <EditField label="10K PB (00:42:13)" value={form.pb_10k} onChange={(v) => setForm({ ...form, pb_10k: v })} />
                 <EditField label="하프 PB" value={form.pb_half} onChange={(v) => setForm({ ...form, pb_half: v })} />
