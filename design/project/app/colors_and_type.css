@@ -1,0 +1,222 @@
+/* ============================================================================
+   iOS 26 Design System — Colors & Type
+   Source: "iOS and iPadOS 26 (Community)" Figma file (Apple HIG / Liquid Glass).
+   This is the canonical, hand-cleaned token + type layer. The raw machine
+   export lives in fig-tokens.css (kept for reference; its dark-mode cascade is
+   noisy because it folds in the Increased-Contrast modes). Consume THIS file.
+
+   Light is the :root default. Add class="dark" (or [data-theme="dark"]) on a
+   container to flip to dark mode.
+   ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+   FONTS
+   Apple ships SF Pro / SF Compact / SF Pro Rounded — proprietary, not
+   web-embeddable. On Apple hardware the system stack below renders the REAL
+   SF Pro. Elsewhere it gracefully falls to the platform UI sans. See README
+   "Fonts" note: drop in licensed SF Pro .woff2 files to make it pixel-exact
+   off-Apple.
+   -------------------------------------------------------------------------- */
+:root {
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro",
+    system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro",
+    system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, monospace;
+}
+
+/* ----------------------------------------------------------------------------
+   COLOR — LIGHT (default)
+   -------------------------------------------------------------------------- */
+:root {
+  /* System accent colors (vivid, iOS 26 tuning) */
+  --accent-blue:   rgb(0,136,255);
+  --accent-brown:  rgb(172,127,94);
+  --accent-cyan:   rgb(0,192,232);
+  --accent-green:  rgb(52,199,89);
+  --accent-indigo: rgb(97,85,245);
+  --accent-mint:   rgb(0,200,179);
+  --accent-orange: rgb(255,141,40);
+  --accent-pink:   rgb(255,45,85);
+  --accent-purple: rgb(203,48,224);
+  --accent-red:    rgb(255,56,60);
+  --accent-teal:   rgb(0,195,208);
+  --accent-yellow: rgb(255,204,0);
+  --tint: var(--accent-blue);            /* default control tint */
+
+  /* Backgrounds — base UI surfaces */
+  --bg-primary:            rgb(255,255,255);
+  --bg-secondary:          rgb(242,242,247);
+  --bg-tertiary:           rgb(255,255,255);
+  --bg-primary-elevated:   rgb(255,255,255);
+
+  /* Grouped backgrounds — used by inset-grouped table views */
+  --bg-grouped-primary:    rgb(242,242,247);
+  --bg-grouped-secondary:  rgb(255,255,255);
+  --bg-grouped-tertiary:   rgb(242,242,247);
+
+  /* Fills — translucent shapes on top of backgrounds (chips, sliders, fields) */
+  --fill-primary:    rgba(120,120,128,0.20);
+  --fill-secondary:  rgba(120,120,128,0.16);
+  --fill-tertiary:   rgba(118,118,128,0.12);
+  --fill-quaternary: rgba(116,116,128,0.08);
+
+  /* Labels — text on top of backgrounds */
+  --label-primary:    rgb(0,0,0);
+  --label-secondary:  rgba(60,60,67,0.60);
+  --label-tertiary:   rgba(60,60,67,0.30);
+  --label-quaternary: rgba(60,60,67,0.18);
+
+  /* Separators */
+  --separator-opaque:     rgb(198,198,200);
+  --separator-non-opaque: rgba(0,0,0,0.12);
+
+  /* Pure grays */
+  --gray:   rgb(142,142,147);
+  --gray-2: rgb(174,174,178);
+  --gray-3: rgb(199,199,204);
+  --gray-4: rgb(209,209,214);
+  --gray-5: rgb(229,229,234);
+  --gray-6: rgb(242,242,247);
+  --black:  rgb(0,0,0);
+  --white:  rgb(255,255,255);
+
+  /* Overlays / scrims */
+  --overlay-default: rgba(0,0,0,0.20);
+  --alert-overlay:   rgba(41,41,58,0.23);
+
+  /* Destructive button helpers */
+  --btn-destructive-fill: rgba(255,56,60,0.14);
+  --btn-tinted-fill:      rgba(0,122,255,0.15);
+
+  color-scheme: light;
+}
+
+/* ----------------------------------------------------------------------------
+   COLOR — DARK
+   -------------------------------------------------------------------------- */
+.dark,
+[data-theme="dark"] {
+  --accent-blue:   rgb(0,145,255);
+  --accent-brown:  rgb(183,138,102);
+  --accent-cyan:   rgb(60,211,254);
+  --accent-green:  rgb(48,209,88);
+  --accent-indigo: rgb(109,124,255);
+  --accent-mint:   rgb(0,218,195);
+  --accent-orange: rgb(255,146,48);
+  --accent-pink:   rgb(255,55,95);
+  --accent-purple: rgb(219,52,242);
+  --accent-red:    rgb(255,66,69);
+  --accent-teal:   rgb(0,210,224);
+  --accent-yellow: rgb(255,214,0);
+  --tint: var(--accent-blue);
+
+  --bg-primary:            rgb(0,0,0);
+  --bg-secondary:          rgb(28,28,30);
+  --bg-tertiary:           rgb(44,44,46);
+  --bg-primary-elevated:   rgb(28,28,30);
+
+  --bg-grouped-primary:    rgb(0,0,0);
+  --bg-grouped-secondary:  rgb(28,28,30);
+  --bg-grouped-tertiary:   rgb(44,44,46);
+
+  --fill-primary:    rgba(120,120,128,0.36);
+  --fill-secondary:  rgba(120,120,128,0.32);
+  --fill-tertiary:   rgba(118,118,128,0.24);
+  --fill-quaternary: rgba(118,118,128,0.18);
+
+  --label-primary:    rgb(255,255,255);
+  --label-secondary:  rgba(235,235,245,0.60);
+  --label-tertiary:   rgba(235,235,245,0.30);
+  --label-quaternary: rgba(235,235,245,0.16);
+
+  --separator-opaque:     rgb(56,56,58);
+  --separator-non-opaque: rgba(255,255,255,0.17);
+
+  --gray:   rgb(142,142,147);
+  --gray-2: rgb(99,99,102);
+  --gray-3: rgb(72,72,74);
+  --gray-4: rgb(58,58,60);
+  --gray-5: rgb(44,44,46);
+  --gray-6: rgb(28,28,30);
+
+  --overlay-default: rgba(0,0,0,0.48);
+  --alert-overlay:   rgba(18,18,18,0.56);
+
+  --btn-destructive-fill: rgba(255,66,69,0.14);
+  --btn-tinted-fill:      rgba(10,132,255,0.15);
+
+  color-scheme: dark;
+}
+
+/* ----------------------------------------------------------------------------
+   LIQUID GLASS — material parameters (iOS 26)
+   Real Liquid Glass is a live refraction shader; on the web we approximate with
+   backdrop-filter blur + saturate + a translucent tint + edge highlight.
+   -------------------------------------------------------------------------- */
+:root {
+  --glass-blur-regular: 7px;   /* frost — regular controls */
+  --glass-blur-medium: 12px;
+  --glass-blur-large: 14px;
+  --glass-saturate: 180%;
+  --glass-tint-light: rgba(255,255,255,0.50);
+  --glass-tint-dark:  rgba(40,40,42,0.50);
+  --glass-edge-light: rgba(255,255,255,0.55);  /* inner top highlight */
+  --glass-edge-dark:  rgba(0,0,0,0.18);        /* inner bottom shade */
+  --glass-shadow: 0 6px 24px rgba(0,0,0,0.16);
+}
+
+/* ----------------------------------------------------------------------------
+   RADII — iOS 26 continuous-corner scale
+   -------------------------------------------------------------------------- */
+:root {
+  --radius-xs: 6px;
+  --radius-sm: 10px;     /* small controls, segmented control thumb */
+  --radius-md: 12px;     /* buttons, inset list rows (legacy) */
+  --radius-lg: 16px;     /* cards, capsule-adjacent */
+  --radius-xl: 22px;     /* large containers, alerts */
+  --radius-2xl: 26px;    /* inset-grouped list group */
+  --radius-sheet-top: 34px;     /* iPhone sheet top corners */
+  --radius-sheet-ipad: 38px;    /* iPad sheet */
+  --radius-pill: 999px;         /* capsules / Liquid Glass buttons */
+}
+
+/* ----------------------------------------------------------------------------
+   SPACING — 4pt grid, common iOS gutters
+   -------------------------------------------------------------------------- */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;   /* standard screen margin */
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --margin-screen: 16px;   /* iPhone leading/trailing content inset */
+  --row-height: 44px;      /* minimum hit target / standard list row */
+  --row-height-lg: 60px;   /* subtitle list row */
+}
+
+/* ----------------------------------------------------------------------------
+   SEMANTIC TYPE — iOS Dynamic Type (Large content size, the default)
+   size / line-height / weight / letter-spacing per Apple's text styles.
+   Apply a class; base font-family is inherited from --font-text/display.
+   -------------------------------------------------------------------------- */
+.ios-large-title { font-family: var(--font-display); font-size: 34px; line-height: 41px; font-weight: 400; letter-spacing: 0.374px; }
+.ios-title-1     { font-family: var(--font-display); font-size: 28px; line-height: 34px; font-weight: 400; letter-spacing: 0.36px; }
+.ios-title-2     { font-family: var(--font-display); font-size: 22px; line-height: 28px; font-weight: 400; letter-spacing: 0.35px; }
+.ios-title-3     { font-family: var(--font-display); font-size: 20px; line-height: 25px; font-weight: 400; letter-spacing: 0.38px; }
+.ios-headline    { font-family: var(--font-text); font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.43px; }
+.ios-body        { font-family: var(--font-text); font-size: 17px; line-height: 22px; font-weight: 400; letter-spacing: -0.43px; }
+.ios-callout     { font-family: var(--font-text); font-size: 16px; line-height: 21px; font-weight: 400; letter-spacing: -0.31px; }
+.ios-subheadline { font-family: var(--font-text); font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: -0.23px; }
+.ios-footnote    { font-family: var(--font-text); font-size: 13px; line-height: 18px; font-weight: 400; letter-spacing: -0.08px; }
+.ios-caption-1   { font-family: var(--font-text); font-size: 12px; line-height: 16px; font-weight: 400; letter-spacing: 0; }
+.ios-caption-2   { font-family: var(--font-text); font-size: 11px; line-height: 13px; font-weight: 400; letter-spacing: 0.07px; }
+
+/* Weight modifiers (combine with a style above) */
+.ios-w-regular  { font-weight: 400; }
+.ios-w-medium   { font-weight: 500; }
+.ios-w-semibold { font-weight: 600; }
+.ios-w-bold     { font-weight: 700; }

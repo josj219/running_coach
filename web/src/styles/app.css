@@ -1,0 +1,55 @@
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg-grouped-primary);
+  font-family: var(--font-text);
+  color: var(--label-primary);
+  overscroll-behavior-y: none;
+  word-break: keep-all; /* 한글 단어 중간 줄바꿈 방지 */
+}
+
+.app-frame {
+  height: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-grouped-primary);
+}
+
+.scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: calc(110px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+.navbar-large {
+  padding: calc(14px + env(safe-area-inset-top)) 20px 6px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.navbar-large h1 {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  margin: 0;
+}
+
+input, textarea, select, button { font-family: inherit; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes modal-pop { from { transform: scale(0.96) translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+.anim-in { animation: fade-in .35s cubic-bezier(.32,.72,0,1); }
+.sheet-card { animation: sheet-up .32s cubic-bezier(.32,.72,0,1); }
+.modal-card { animation: modal-pop .28s cubic-bezier(.32,.72,0,1); }
+
+/* 스트리밍 커서 */
+.stream-cursor::after { content: '▍'; animation: blink 1s steps(1) infinite; opacity: .7; }
+@keyframes blink { 50% { opacity: 0; } }

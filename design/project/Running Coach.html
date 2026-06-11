@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>러닝 퍼포먼스 코치</title>
+<link rel="stylesheet" href="app/colors_and_type.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body {
+    background: #1a1a1e;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-text);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+  button:focus { outline: none; }
+  input:focus { outline: none; }
+  textarea:focus { outline: none; }
+
+  /* scale stage */
+  #stage {
+    width: 393px; height: 852px;
+    transform-origin: center center;
+    flex: none;
+  }
+
+  /* spin animation used in loading states */
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* scrollbar hidden on all scroll regions */
+  * { scrollbar-width: none; }
+</style>
+
+<!-- React + Babel (pinned) -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js"
+  integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"
+  integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"
+  integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="stage">
+  <div id="root" style="width:100%;height:100%;"></div>
+</div>
+
+<!-- Tweaks panel first (exports useTweaks, TweaksPanel, etc.) -->
+<script type="text/babel" src="app/tweaks-panel.jsx"></script>
+<!-- Icons -->
+<script type="text/babel" src="app/icons.jsx"></script>
+<!-- iPhone chrome: StatusBar, IPhoneFrame, NavBarLarge, NavBarInline -->
+<script type="text/babel" src="app/chrome.jsx"></script>
+<!-- Controls: Toggle, SegmentedControl, Slider, Button, SearchField, IconTile -->
+<script type="text/babel" src="app/controls.jsx"></script>
+<!-- List: ListSection, Row -->
+<script type="text/babel" src="app/list.jsx"></script>
+<!-- Tab bar -->
+<script type="text/babel" src="app/tabbar.jsx"></script>
+<!-- Domain data + mock state -->
+<script type="text/babel" src="app/data.jsx"></script>
+<!-- Sporty UI layer -->
+<script type="text/babel" src="app/ui.jsx"></script>
+<!-- Screens -->
+<script type="text/babel" src="app/today.jsx"></script>
+<script type="text/babel" src="app/week.jsx"></script>
+<script type="text/babel" src="app/record.jsx"></script>
+<script type="text/babel" src="app/history.jsx"></script>
+<script type="text/babel" src="app/settings.jsx"></script>
+<!-- Root -->
+<script type="text/babel" src="app/app.jsx"></script>
+
+<script>
+  // Scale the 393×852 phone frame to fit the viewport, maintaining aspect ratio
+  function scaleStage() {
+    const stage = document.getElementById('stage');
+    const scaleX = window.innerWidth  / 393;
+    const scaleY = window.innerHeight / 852;
+    const s = Math.min(scaleX, scaleY, 1); // never enlarge beyond 1x
+    stage.style.transform = `scale(${s})`;
+  }
+  scaleStage();
+  window.addEventListener('resize', scaleStage);
+</script>
+</body>
+</html>

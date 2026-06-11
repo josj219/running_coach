@@ -1,0 +1,61 @@
+# 프로덕션 — AWS Lightsail + Cloudflare Tunnel.
+# 개발용 docker-compose.yml과 차이:
+#  - 인바운드 포트를 하나도 host에 공개하지 않는다(터널이 web:80으로 내부 접속, 서버 방화벽 닫힘).
+#  - restart: always 로 재부팅·크래시 자동 복구.
+#  - SEED_DEMO_WEEK=0 으로 데모 주간 계획 시드 끔(첫 실행은 온보딩).
+#  - cloudflared 컨테이너가 Cloudflare Tunnel을 맺어 HTTPS·Access 게이트를 제공.
+# 실행: docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: coach
+      POSTGRES_USER: coach
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-coach}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coach -d coach"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: ./api
+    restart: always
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://coach:${DB_PASSWORD:-coach}@db:5432/coach
+      TZ: ${TZ:-Asia/Seoul}
+      SEED_DEMO_WEEK: "0"   # 깨끗한 시작 — 내 데이터로 첫 주간 계획 생성
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build: ./web
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Cloudflare Tunnel — 도메인/고정IP/포트개방 없이 HTTPS 외부 노출.
+  # Zero Trust 대시보드에서 named tunnel 생성 → public hostname을 http://web:80 으로 라우팅
+  # → 같은 호스트네임에 Access 정책(이메일/구글 로그인)을 걸어 접근을 잠근다.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    depends_on:
+      - web
+
+volumes:
+  pgdata:

@@ -1,0 +1,13 @@
+{
+  "nickname": "고고조",
+  "goal_race": "풀마라톤 sub330",
+  "goal_date": "2026-11-01",
+  "weekly_goal_km": 45,
+  "max_hr": 0,
+  "resting_hr": 0,
+  "vo2_max": 0,
+  "pace_unit": "분/km",
+  "distance_unit": "km",
+  "notify_training": true,
+  "notify_after_workout": true
+}

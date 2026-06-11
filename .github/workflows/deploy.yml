@@ -1,0 +1,61 @@
+# main 푸시 → Lightsail의 self-hosted runner가 그 자리에서 빌드·재기동.
+# runner가 배포 서버 위에 있으므로 SSH 키·인바운드 포트가 필요 없다.
+#
+# 사전 준비(docs/DEPLOY.md 참고):
+#  - Lightsail에 self-hosted runner 등록(라벨: self-hosted, linux)
+#  - runner 사용자에 docker 권한(docker 그룹)
+#  - GitHub repo Secrets: ANTHROPIC_API_KEY, DB_PASSWORD, TUNNEL_TOKEN
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # 수동 실행 버튼
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # 배포 중첩 방지(앞 배포 끝나고 진행)
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      # 시크릿으로 .env 작성(.env는 git에 없음). 서버 디스크에만 남는다.
+      - name: Write .env
+        run: |
+          umask 077
+          cat > .env <<EOF
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL=claude-sonnet-4-6
+          COACH_MOCK=
+          TUNNEL_TOKEN=${{ secrets.TUNNEL_TOKEN }}
+          STRAVA_CLIENT_ID=${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET=${{ secrets.STRAVA_CLIENT_SECRET }}
+          WEB_BASE_URL=${{ secrets.WEB_BASE_URL }}
+          API_BASE_URL=${{ secrets.API_BASE_URL }}
+          TZ=Asia/Seoul
+          EOF
+
+      - name: Build & deploy
+        run: docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+
+      # api 컨테이너 안에서 헬스체크(포트를 host에 공개하지 않으므로 exec로 확인)
+      - name: Health check
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose -f docker-compose.prod.yml exec -T api \
+                 curl -fsS http://localhost:8000/api/health; then
+              echo "✅ healthy"; exit 0
+            fi
+            echo "… waiting ($i/30)"; sleep 3
+          done
+          echo "❌ health check 실패 — 최근 로그:"
+          docker compose -f docker-compose.prod.yml logs --tail=50 api
+          exit 1
+
+      - name: Prune old images
+        if: always()
+        run: docker image prune -f

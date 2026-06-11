@@ -1,0 +1,360 @@
+// 훈련 기록 입력 모달 + AI 리뷰 스트리밍.
+// UX: Strava 자동 채움 → 필수 입력은 거리·시간·몸상태 3개뿐. 나머지는 '자세히'에 접어둠.
+// '오늘 달리지 않았어요' 체크 시 수치 입력을 숨기고 소감(직접 기록) 기반으로 저장한다.
+import React, { useEffect, useMemo, useState } from 'react';
+import { api, streamReview } from '../api.js';
+import { autoPace, BODY_PARTS, FEEL_OPTIONS, parseTimeToSec, wmeta } from '../workouts.js';
+import { Banner, Card, CTA, Icon, MetricRow, Modal, RecoveryBadge } from './Ui.jsx';
+
+function FieldLabel({ children }) {
+  return <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label-secondary)',
+    textTransform: 'uppercase', letterSpacing: '0.4px', margin: '18px 0 8px' }}>{children}</div>;
+}
+
+function NumInput({ value, onChange, placeholder, unit, flex = 1, mode = 'decimal' }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--fill-tertiary)', borderRadius: 12, padding: '11px 14px', flex }}>
+      <input type="text" inputMode={mode} value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{ border: 'none', outline: 'none', background: 'none', flex: 1, fontFamily: 'var(--font-display)',
+          fontSize: 22, fontWeight: 700, color: 'var(--label-primary)', letterSpacing: '-0.5px', width: '100%', minWidth: 0 }} />
+      {unit && <span style={{ fontSize: 14, color: 'var(--label-tertiary)', fontWeight: 600, marginLeft: 4 }}>{unit}</span>}
+    </div>
+  );
+}
+
+function StravaImport({ onPick }) {
+  const [state, setState] = useState('idle'); // idle | loading | list | empty | off
+  const [items, setItems] = useState([]);
+
+  const load = async () => {
+    setState('loading');
+    try {
+      const integ = await api.integrations();
+      if (!integ.strava.connected) { setState('off'); return; }
+      const res = await api.stravaActivities(5);
+      if (!res.items.length) { setState('empty'); return; }
+      setItems(res.items);
+      setState('list');
+    } catch { setState('empty'); }
+  };
+
+  if (state === 'idle') {
+    return (
+      <button onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+        padding: '14px 16px', borderRadius: 16, border: 'none', cursor: 'pointer', textAlign: 'left',
+        background: 'linear-gradient(135deg, rgba(252,76,2,0.14), rgba(252,76,2,0.06))' }}>
+        <span style={{ width: 40, height: 40, borderRadius: 12, background: '#FC4C02', display: 'grid', placeItems: 'center', flex: 'none' }}>
+          <Icon name="Zap" size={20} color="#fff" /></span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--label-primary)' }}>Strava에서 가져오기</div>
+          <div style={{ fontSize: 13, color: 'var(--label-secondary)' }}>거리·시간·페이스·심박 자동 입력</div>
+        </div>
+        <Icon name="ChevronRight" size={18} color="var(--label-tertiary)" />
+      </button>
+    );
+  }
+  if (state === 'loading') return <div style={{ padding: 14, fontSize: 14, color: 'var(--label-secondary)' }}>활동 불러오는 중…</div>;
+  if (state === 'off') return <Banner tone="info">설정 탭에서 Strava를 연결하면 기록이 자동으로 채워져요.</Banner>;
+  if (state === 'empty') return <Banner tone="info">가져올 러닝 활동이 없어요. 직접 입력해 주세요.</Banner>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {items.map((a) => (
+        <button key={a.id} onClick={() => onPick(a)}
+          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 14,
+            border: 'none', cursor: 'pointer', background: 'var(--fill-tertiary)', textAlign: 'left' }}>
+          <span style={{ width: 34, height: 34, borderRadius: 10, background: '#FC4C02', display: 'grid', placeItems: 'center', flex: 'none' }}>
+            <Icon name="Footprints" size={17} color="#fff" /></span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--label-primary)', whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name || '러닝'}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--label-secondary)' }}>
+              {a.start_date?.slice(5, 10)} · {a.distance_km}km · {a.avg_pace}/km{a.avg_hr ? ` · ♥${a.avg_hr}` : ''}</div>
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#FC4C02', flex: 'none' }}>채우기</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// 스트림 원문(JSON 토큰)에서 coach_comment 값만 점진 추출 — 코드/중괄호 노출 방지
+function previewFromStream(raw) {
+  const m = raw.match(/"coach_comment"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (!m) return null;
+  return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+}
+
+export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
+  const w = wmeta(session?.kind || 'easy');
+  const [form, setForm] = useState({ distance: '', minutes: '', seconds: '', pace: '', avgHr: '', maxHr: '', cadence: '', feel: 3, note: '' });
+  const [noRun, setNoRun] = useState(false);   // 오늘 달리지 않았어요 — 수치 입력 숨김
+  const [pain, setPain] = useState([]);          // 선택된 부위
+  const [painLevels, setPainLevels] = useState({});
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [phase, setPhase] = useState('form');    // form | saving | review
+  const [error, setError] = useState(null);
+  const [logId, setLogId] = useState(null);
+  const [streamText, setStreamText] = useState('');
+  const [review, setReview] = useState(null);
+  const [source, setSource] = useState('manual');
+  const [externalId, setExternalId] = useState(null);
+
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // 거리+시간 입력 시 페이스 자동 계산 (직접 수정도 가능)
+  const calcPace = useMemo(() => autoPace(form.distance, parseTimeToSec(form.minutes, form.seconds)), [form.distance, form.minutes, form.seconds]);
+  useEffect(() => { if (calcPace) set('pace', calcPace); }, [calcPace]);
+
+  const pickActivity = (a) => {
+    const min = a.duration_sec ? Math.floor(a.duration_sec / 60) : '';
+    const sec = a.duration_sec ? a.duration_sec % 60 : '';
+    setForm((p) => ({ ...p, distance: String(a.distance_km ?? ''), minutes: String(min), seconds: String(sec),
+      pace: a.avg_pace || '', avgHr: a.avg_hr ? String(a.avg_hr) : '', maxHr: a.max_hr ? String(a.max_hr) : '',
+      cadence: a.cadence ? String(a.cadence) : '' }));
+    setSource('strava');
+    setExternalId(a.external_id);
+    setDetailOpen(true);
+  };
+
+  const maxPain = Math.max(0, ...pain.map((p) => painLevels[p] || 3));
+
+  const save = async () => {
+    setError(null);
+    setPhase('saving');
+    try {
+      const body = {
+        log_date: todayDate,
+        kind: session?.kind || 'easy',
+        distance_km: noRun ? 0 : (parseFloat(form.distance) || 0),
+        duration_sec: noRun ? null : parseTimeToSec(form.minutes, form.seconds),
+        avg_pace: noRun ? null : (form.pace || null),
+        avg_hr: noRun ? null : (parseInt(form.avgHr, 10) || null),
+        max_hr: noRun ? null : (parseInt(form.maxHr, 10) || null),
+        cadence: noRun ? null : (parseInt(form.cadence, 10) || null),
+        feel: form.feel,
+        fatigue_num: { 1: 9, 2: 7, 3: 3, 4: 1 }[form.feel],
+        pain_part: pain.join(', ') || null,
+        pain_level: maxPain,
+        user_comment: noRun && form.note
+          ? `(달리기 기록 없음 — 직접 기록) ${form.note}` : (form.note || null),
+        source, external_id: externalId,
+      };
+      const res = await api.saveLog(body);
+      setLogId(res.id);
+      setPhase('review');
+      startReview(res.id);
+    } catch (e) {
+      setPhase('form');
+      setError(`저장 실패: ${e.message}`);
+    }
+  };
+
+  const startReview = (id) => {
+    setStreamText('');
+    setReview(null);
+    setError(null);
+    streamReview(id, {
+      onToken: (t) => setStreamText((p) => p + t),
+      onDone: (r) => setReview(r),
+      onError: () => setError('리뷰 생성에 실패했어요 — 기록은 저장됐습니다.'),
+    });
+  };
+
+  const preview = previewFromStream(streamText);
+  const hasMetrics = !noRun && (form.distance || form.pace || form.avgHr);
+
+  return (
+    <Modal
+      title={phase === 'review' ? 'AI 코치 분석' : phase === 'saving' ? '저장 중…' : '훈련 기록'}
+      subtitle={session?.title || '오늘 훈련'}
+      locked={phase === 'saving'}
+      onClose={() => onClose(phase === 'review')}>
+
+      {phase === 'saving' && (
+        <div style={{ padding: '60px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 16, background: w.color, display: 'grid', placeItems: 'center',
+            boxShadow: `0 6px 20px rgba(${w.rgb},0.35)`, animation: 'spin 1.2s linear infinite' }}>
+            <Icon name="Sparkles" size={26} color="#fff" />
+          </div>
+          <div style={{ fontSize: 16, color: 'var(--label-secondary)' }}>기록 저장 중…</div>
+        </div>
+      )}
+
+      {phase === 'review' && (
+        <div style={{ padding: '18px 20px 24px' }}>
+          {hasMetrics && (
+            <Card style={{ marginBottom: 14 }}>
+              <MetricRow size={24} items={[
+                { value: form.distance || '0', unit: 'km', label: '거리' },
+                { value: form.pace || '--', label: '페이스' },
+                { value: form.avgHr || '--', label: '평균 심박' },
+              ]} />
+            </Card>
+          )}
+          {review?.summary && (
+            <Card style={{ marginBottom: 14 }} pad={14}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Icon name="CircleCheck" size={17} color={w.color} style={{ flex: 'none', marginTop: 2 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label-secondary)', marginBottom: 3 }}>오늘 훈련 요약</div>
+                  <div style={{ fontSize: 14.5, lineHeight: 1.5, color: 'var(--label-primary)' }}>{review.summary}</div>
+                </div>
+              </div>
+            </Card>
+          )}
+          <Card style={{ background: `rgba(${w.rgb},0.08)`, boxShadow: 'none', marginBottom: 14 }}>
+            <div style={{ display: 'flex', gap: 11 }}>
+              <span style={{ width: 30, height: 30, borderRadius: 9, background: w.color, flex: 'none',
+                display: 'grid', placeItems: 'center' }}><Icon name="Sparkles" size={16} color="#fff" /></span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: w.color, marginBottom: 4 }}>코치 분석</div>
+                {review ? (
+                  <div style={{ fontSize: 15, lineHeight: 1.55, color: 'var(--label-primary)' }}>
+                    <div>{review.coach_comment}</div>
+                    {review.strengths && <div style={{ marginTop: 10 }}>
+                      <b style={{ fontSize: 13 }}>잘한 점</b>
+                      <div style={{ whiteSpace: 'pre-line', fontSize: 14, color: 'var(--label-secondary)' }}>{review.strengths}</div></div>}
+                    {review.improvements && <div style={{ marginTop: 8 }}>
+                      <b style={{ fontSize: 13 }}>개선할 점</b>
+                      <div style={{ whiteSpace: 'pre-line', fontSize: 14, color: 'var(--label-secondary)' }}>{review.improvements}</div></div>}
+                  </div>
+                ) : error ? null : preview ? (
+                  <div className="stream-cursor" style={{ fontSize: 15, lineHeight: 1.55, color: 'var(--label-primary)',
+                    whiteSpace: 'pre-line' }}>{preview}</div>
+                ) : (
+                  <div className="stream-cursor" style={{ fontSize: 15, lineHeight: 1.55, color: 'var(--label-secondary)' }}>
+                    코치가 기록을 분석하는 중…</div>
+                )}
+              </div>
+            </div>
+            {review && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 13,
+                borderTop: '0.5px solid var(--separator-non-opaque)' }}>
+                <RecoveryBadge level={review.recovery} />
+                {review.next_impact && <span style={{ fontSize: 13, color: 'var(--label-secondary)' }}>{review.next_impact}</span>}
+              </div>
+            )}
+          </Card>
+          {error && <div style={{ marginBottom: 14 }}>
+            <Banner tone="error" action="재시도" onAction={() => startReview(logId)}>{error}</Banner></div>}
+          <CTA onClick={() => onClose(true)} icon="Check">확인</CTA>
+        </div>
+      )}
+
+      {phase === 'form' && (
+        <div style={{ padding: '16px 20px 24px' }}>
+          {!noRun && <StravaImport onPick={pickActivity} />}
+
+          {/* 달리기 기록이 없는 날 — 수치 입력 없이 소감 기반으로 기록 */}
+          <button onClick={() => setNoRun(!noRun)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: noRun ? 0 : 12,
+              padding: '12px 14px', borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left',
+              background: noRun ? 'color-mix(in srgb, var(--tint) 12%, transparent)' : 'var(--fill-tertiary)' }}>
+            <span style={{ width: 22, height: 22, borderRadius: 7, flex: 'none', display: 'grid', placeItems: 'center',
+              background: noRun ? 'var(--tint)' : 'var(--fill-secondary)', transition: 'background .12s' }}>
+              {noRun && <Icon name="Check" size={14} color="#fff" strokeWidth={3} />}
+            </span>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--label-primary)' }}>오늘 달리지 않았어요</div>
+              <div style={{ fontSize: 13, color: 'var(--label-secondary)' }}>거리·시간 없이, 아래에 한 일을 적어 기록해요</div>
+            </div>
+          </button>
+
+          {!noRun && (
+            <>
+              <FieldLabel>기본 기록</FieldLabel>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <NumInput value={form.distance} onChange={(v) => set('distance', v)} placeholder="0.0" unit="km" />
+                <NumInput value={form.minutes} onChange={(v) => set('minutes', v)} placeholder="분" mode="numeric" />
+                <NumInput value={form.seconds} onChange={(v) => set('seconds', v)} placeholder="초" mode="numeric" />
+              </div>
+              {form.pace && <div style={{ marginTop: 8, fontSize: 13, color: 'var(--label-secondary)' }}>
+                평균 페이스 <b style={{ color: 'var(--label-primary)' }}>{form.pace} /km</b> (자동 계산)</div>}
+            </>
+          )}
+
+          <FieldLabel>오늘 몸 상태</FieldLabel>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {FEEL_OPTIONS.map((f) => (
+              <button key={f.v} onClick={() => set('feel', f.v)}
+                style={{ flex: 1, padding: '12px 6px', borderRadius: 14, border: 'none', cursor: 'pointer',
+                  transition: 'all .15s', background: form.feel === f.v ? 'var(--tint)' : 'var(--fill-tertiary)',
+                  transform: form.feel === f.v ? 'scale(1.05)' : 'none' }}>
+                <div style={{ fontSize: 24, lineHeight: 1 }}>{f.emoji}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 5,
+                  color: form.feel === f.v ? '#fff' : 'var(--label-tertiary)' }}>{f.label}</div>
+              </button>
+            ))}
+          </div>
+
+          {/* 선택 입력 접기 — 입력 부담 최소화 */}
+          {!noRun && (
+            <button onClick={() => setDetailOpen(!detailOpen)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '18px 0 0', background: 'none',
+                border: 'none', cursor: 'pointer', color: 'var(--tint)', fontSize: 14, fontWeight: 600, padding: 0 }}>
+              <Icon name={detailOpen ? 'ChevronUp' : 'ChevronDown'} size={16} strokeWidth={2.4} />
+              심박·케이던스·통증 자세히 입력 {detailOpen ? '접기' : ''}
+            </button>
+          )}
+
+          {(detailOpen || noRun) && (
+            <div className="anim-in">
+              {!noRun && (
+                <>
+                  <FieldLabel>심박 · 케이던스</FieldLabel>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <NumInput value={form.avgHr} onChange={(v) => set('avgHr', v)} placeholder="평균" unit="bpm" mode="numeric" />
+                    <NumInput value={form.maxHr} onChange={(v) => set('maxHr', v)} placeholder="최대" unit="bpm" mode="numeric" />
+                    <NumInput value={form.cadence} onChange={(v) => set('cadence', v)} placeholder="170" unit="spm" mode="numeric" />
+                  </div>
+                </>
+              )}
+
+              <FieldLabel>불편한 곳 (선택)</FieldLabel>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {BODY_PARTS.map((p) => {
+                  const on = pain.includes(p);
+                  return (
+                    <button key={p} onClick={() => setPain((prev) => on ? prev.filter((x) => x !== p) : [...prev, p])}
+                      style={{ padding: '7px 14px', borderRadius: 999, border: 'none', cursor: 'pointer',
+                        fontSize: 14, fontWeight: 600, transition: 'all .12s',
+                        background: on ? 'rgba(255,56,60,0.14)' : 'var(--fill-tertiary)',
+                        color: on ? 'var(--accent-red)' : 'var(--label-secondary)' }}>{p}</button>
+                  );
+                })}
+              </div>
+              {pain.map((p) => (
+                <div key={p} style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: 'var(--label-primary)' }}>
+                    {p} · {painLevels[p] || 3}/10</div>
+                  <input type="range" min={1} max={10} value={painLevels[p] || 3}
+                    onChange={(e) => setPainLevels((prev) => ({ ...prev, [p]: parseInt(e.target.value, 10) }))}
+                    style={{ width: '100%', accentColor: 'var(--accent-red)' }} />
+                </div>
+              ))}
+              {maxPain >= 4 && <div style={{ marginTop: 10 }}>
+                <Banner tone="warn">통증 4/10 이상 — 코치가 회복 우선으로 판단해요.</Banner></div>}
+            </div>
+          )}
+
+          <FieldLabel>오늘 한 훈련 · 소감 {noRun ? '' : '(선택)'}</FieldLabel>
+          <div style={{ background: 'var(--fill-tertiary)', borderRadius: 12, padding: '12px 14px' }}>
+            <textarea value={form.note} onChange={(e) => set('note', e.target.value)}
+              placeholder={'한 일을 자유롭게 적어주세요 — 코치가 요약·분석에 반영해요.\n예: 폼 드릴 15분, 푸쉬업 30×2, 철봉 20×3. 발목 괜찮았음'}
+              rows={3} style={{ border: 'none', outline: 'none', background: 'none', width: '100%', resize: 'none',
+                fontSize: 16, color: 'var(--label-primary)', lineHeight: 1.5 }} />
+          </div>
+
+          {error && <div style={{ marginTop: 14 }}><Banner tone="error">{error}</Banner></div>}
+
+          <div style={{ padding: '18px 0 8px' }}>
+            <CTA onClick={save} icon="Sparkles"
+              disabled={noRun ? !form.note.trim() : (!form.distance && !form.minutes)}>
+              저장하고 리뷰 받기</CTA>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}

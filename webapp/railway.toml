@@ -1,0 +1,13 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "webapp/Dockerfile"
+
+[deploy]
+startCommand = "streamlit run webapp/app.py --server.port=8501 --server.address=0.0.0.0"
+healthcheckPath = "/_stcore/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[[services]]
+name = "performance-coach-webapp"

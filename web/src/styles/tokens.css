@@ -1,0 +1,72 @@
+/* iOS 26 Design System — design/project/app/colors_and_type.css 이식 (핵심 토큰) */
+:root {
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro",
+    system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro",
+    system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --accent-blue:   rgb(0,136,255);
+  --accent-cyan:   rgb(0,192,232);
+  --accent-green:  rgb(52,199,89);
+  --accent-indigo: rgb(97,85,245);
+  --accent-orange: rgb(255,141,40);
+  --accent-pink:   rgb(255,45,85);
+  --accent-red:    rgb(255,56,60);
+  --accent-teal:   rgb(0,195,208);
+  --tint: var(--accent-blue);
+
+  --bg-grouped-primary:    rgb(242,242,247);
+  --bg-grouped-secondary:  rgb(255,255,255);
+
+  --fill-primary:    rgba(120,120,128,0.20);
+  --fill-secondary:  rgba(120,120,128,0.16);
+  --fill-tertiary:   rgba(118,118,128,0.12);
+
+  --label-primary:    rgb(0,0,0);
+  --label-secondary:  rgba(60,60,67,0.60);
+  --label-tertiary:   rgba(60,60,67,0.30);
+
+  --separator-non-opaque: rgba(0,0,0,0.12);
+  --gray: rgb(142,142,147);
+
+  --btn-tinted-fill: rgba(0,122,255,0.15);
+
+  --glass-tint: rgba(255,255,255,0.62);
+  --glass-edge: rgba(255,255,255,0.55);
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 6px 18px rgba(0,0,0,0.05);
+
+  color-scheme: light;
+}
+
+/* 다크 — Spotify/Instagram 무드의 딥 블랙 서피스 */
+[data-theme="dark"] {
+  --accent-blue:   rgb(0,145,255);
+  --accent-cyan:   rgb(60,211,254);
+  --accent-green:  rgb(48,209,88);
+  --accent-indigo: rgb(109,124,255);
+  --accent-orange: rgb(255,146,48);
+  --accent-pink:   rgb(255,55,95);
+  --accent-red:    rgb(255,66,69);
+  --accent-teal:   rgb(0,210,224);
+
+  --bg-grouped-primary:    rgb(0,0,0);
+  --bg-grouped-secondary:  rgb(22,22,24);
+
+  --fill-primary:    rgba(120,120,128,0.36);
+  --fill-secondary:  rgba(120,120,128,0.32);
+  --fill-tertiary:   rgba(118,118,128,0.24);
+
+  --label-primary:    rgb(255,255,255);
+  --label-secondary:  rgba(235,235,245,0.60);
+  --label-tertiary:   rgba(235,235,245,0.30);
+
+  --separator-non-opaque: rgba(255,255,255,0.14);
+
+  --btn-tinted-fill: rgba(10,132,255,0.15);
+
+  --glass-tint: rgba(28,28,30,0.62);
+  --glass-edge: rgba(255,255,255,0.10);
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 6px 18px rgba(0,0,0,0.35);
+
+  color-scheme: dark;
+}
