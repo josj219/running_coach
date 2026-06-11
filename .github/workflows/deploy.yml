@@ -69,6 +69,12 @@ jobs:
         run: |
           echo "===== compose ps ====="
           docker compose -f docker-compose.prod.yml ps
+          echo "===== all docker containers (strays?) ====="
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+          echo "===== host-level cloudflared (2nd connector on same tunnel?) ====="
+          pgrep -a cloudflared || echo "no host cloudflared process"
+          systemctl list-units --type=service --all 2>/dev/null | grep -i cloudflar || echo "no cloudflared systemd unit"
+          ls -la /etc/cloudflared 2>/dev/null || echo "no /etc/cloudflared"
           echo "===== api -> web:80 (origin that cloudflared hits) ====="
           docker compose -f docker-compose.prod.yml exec -T api \
             curl -isS -m 10 http://web:80/ | head -20 || echo "❌ web:80 응답 실패"
