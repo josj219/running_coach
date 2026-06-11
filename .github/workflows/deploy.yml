@@ -56,6 +56,12 @@ jobs:
           docker compose -f docker-compose.prod.yml logs --tail=50 api
           exit 1
 
+      # 매 배포마다 web 컨테이너가 재생성되며 도커 네트워크 IP가 바뀐다.
+      # cloudflared는 변경이 없어 재생성되지 않으면 옛 web IP를 계속 dial → 502.
+      # 따라서 web의 새 IP를 다시 resolve하도록 cloudflared를 강제 재생성한다.
+      - name: Recreate cloudflared (refresh origin IP)
+        run: docker compose -f docker-compose.prod.yml up -d --force-recreate cloudflared
+
       # web(=cloudflared의 origin)이 실제로 80에서 응답하는지 + 상태/로그 덤프.
       # 기존 health check는 api만 봐서 web 장애(502)를 못 잡았다. 진단용.
       - name: Web reachability + diagnostics
