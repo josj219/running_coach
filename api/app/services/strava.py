@@ -26,19 +26,21 @@ class StravaError(Exception):
     pass
 
 
-def authorize_url(redirect_uri: str) -> str:
+def authorize_url(redirect_uri: str, state: str = "") -> str:
     s = get_settings()
     if not s.strava_client_id:
         raise StravaError("STRAVA_CLIENT_ID가 설정되어 있지 않습니다 (.env 참고).")
     from urllib.parse import urlencode
-    q = urlencode({
+    params = {
         "client_id": s.strava_client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "approval_prompt": "auto",
         "scope": "read,activity:read_all",
-    })
-    return f"{AUTH_URL}?{q}"
+    }
+    if state:
+        params["state"] = state  # 콜백에서 사용자 식별(서명된 JWT)
+    return f"{AUTH_URL}?{urlencode(params)}"
 
 
 async def exchange_code(code: str) -> dict:

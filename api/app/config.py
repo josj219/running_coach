@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     claude_model: str = "claude-sonnet-4-6"
     coach_mock: str = ""  # "1"이면 실 API 미호출(테스트/CI)
 
+    # 인증 (이메일+비밀번호 → JWT). 운영에서는 JWT_SECRET을 반드시 환경변수로 주입.
+    jwt_secret: str = "dev-insecure-change-me"
+    jwt_expire_days: int = 30
+
     # Strava OAuth (https://www.strava.com/settings/api 에서 발급)
     strava_client_id: str = ""
     strava_client_secret: str = ""

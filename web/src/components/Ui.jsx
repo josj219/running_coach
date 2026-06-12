@@ -4,7 +4,7 @@ import {
   Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
   CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
-  LoaderCircle, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
+  LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
   StretchHorizontal, Target, Trash2, TrendingUp, Trophy, Watch, Wind, X, Zap,
 } from 'lucide-react';
 import { WEEK_DAYS, wmeta } from '../workouts.js';
@@ -13,7 +13,7 @@ const ICONS = {
   Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
   CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
-  LoaderCircle, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
+  LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
   StretchHorizontal, Target, Trash2, TrendingUp, Trophy, Watch, Wind, X, Zap,
 };
 

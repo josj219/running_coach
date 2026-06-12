@@ -9,11 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import PlanSession, WeeklyEvaluation, WeeklyPlan, WorkoutLog, get_db
+from ..auth import get_current_user
+from ..db import PlanSession, User, WeeklyEvaluation, WeeklyPlan, WorkoutLog, get_db
 from ..prompts import PLAN_ADJUSTMENT_PROMPT, WEEKLY_EVALUATION_PROMPT, WEEKLY_PLAN_PROMPT
 from ..services import coach
 from ..services.context import (
-    USER_ID, get_current_plan, iso_week_of, render_availability_context,
+    get_current_plan, iso_week_of, render_availability_context,
     render_profile_context, render_recent_history, render_session_line,
     render_week_context, week_progress, week_start_of,
 )
@@ -31,11 +32,11 @@ def _parse_iso(iso_week: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2))
 
 
-async def _plan_payload(db: AsyncSession, plan: WeeklyPlan) -> dict:
+async def _plan_payload(db: AsyncSession, plan: WeeklyPlan, user_id: int) -> dict:
     res = await db.execute(select(PlanSession).where(PlanSession.plan_id == plan.id)
                            .order_by(PlanSession.session_date))
     sessions = [_session_dict(s) for s in res.scalars()]
-    progress = await week_progress(db, plan, date.today())
+    progress = await week_progress(db, plan, date.today(), user_id)
     ev = (await db.execute(select(WeeklyEvaluation).where(
         WeeklyEvaluation.plan_id == plan.id,
     ))).scalar_one_or_none()
@@ -55,26 +56,28 @@ async def _plan_payload(db: AsyncSession, plan: WeeklyPlan) -> dict:
 
 
 @router.get("/weeks/current")
-async def get_current_week(db: AsyncSession = Depends(get_db)):
-    plan = await get_current_plan(db, date.today())
+async def get_current_week(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    plan = await get_current_plan(db, date.today(), user.id)
     if plan is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "이번 주 계획이 없습니다."})
-    return await _plan_payload(db, plan)
+    return await _plan_payload(db, plan, user.id)
 
 
 @router.get("/weeks/{iso_week}")
-async def get_week(iso_week: str, db: AsyncSession = Depends(get_db)):
+async def get_week(iso_week: str, user: User = Depends(get_current_user),
+                   db: AsyncSession = Depends(get_db)):
     y, w = _parse_iso(iso_week)
     plan = (await db.execute(select(WeeklyPlan).where(
-        WeeklyPlan.user_id == USER_ID, WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
+        WeeklyPlan.user_id == user.id, WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
     ))).scalar_one_or_none()
     if plan is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": f"{iso_week} 계획이 없습니다."})
-    return await _plan_payload(db, plan)
+    return await _plan_payload(db, plan, user.id)
 
 
 @router.get("/stats/weekly")
-async def weekly_stats(weeks: int = 6, db: AsyncSession = Depends(get_db)):
+async def weekly_stats(weeks: int = 6, user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
     """기록 탭 — 최근 N주 거리/세션/수행률 + 최근 러닝 목록."""
     today = date.today()
     out = []
@@ -82,13 +85,13 @@ async def weekly_stats(weeks: int = 6, db: AsyncSession = Depends(get_db)):
         ws = week_start_of(today) - timedelta(weeks=i)
         y, w = iso_week_of(ws)
         plan = (await db.execute(select(WeeklyPlan).where(
-            WeeklyPlan.user_id == USER_ID, WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
+            WeeklyPlan.user_id == user.id, WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
         ))).scalar_one_or_none()
-        progress = await week_progress(db, plan, ws)
+        progress = await week_progress(db, plan, ws, user.id)
         if plan is None:
             # 계획 없는 주도 실제 로그 거리는 집계
             res = await db.execute(select(WorkoutLog).where(
-                WorkoutLog.user_id == USER_ID,
+                WorkoutLog.user_id == user.id,
                 WorkoutLog.log_date >= ws, WorkoutLog.log_date <= ws + timedelta(days=6),
             ))
             km = round(sum(float(l.distance_km or 0) for l in res.scalars()), 1)
@@ -107,17 +110,18 @@ class GenerateWeekIn(BaseModel):
 
 
 @router.post("/weekly-plans", status_code=201)
-async def generate_weekly_plan(body: GenerateWeekIn, db: AsyncSession = Depends(get_db)):
+async def generate_weekly_plan(body: GenerateWeekIn, user: User = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
     today = date.today()
     ws = body.week_start or week_start_of(today)
     y, w = iso_week_of(ws)
 
-    profile = await render_profile_context(db)
-    availability = await render_availability_context(db)
-    history = await render_recent_history(db)
-    prev_plan = await get_current_plan(db, ws - timedelta(days=7))
+    profile = await render_profile_context(db, user.id)
+    availability = await render_availability_context(db, user.id)
+    history = await render_recent_history(db, user.id)
+    prev_plan = await get_current_plan(db, ws - timedelta(days=7), user.id)
     prev_ctx = await render_week_context(db, prev_plan)
-    prev_progress = await week_progress(db, prev_plan, ws - timedelta(days=1))
+    prev_progress = await week_progress(db, prev_plan, ws - timedelta(days=1), user.id)
 
     message = (
         f"{profile}\n\n{availability}\n\n{history}\n\n[지난 주]\n{prev_ctx}\n"
@@ -135,10 +139,10 @@ async def generate_weekly_plan(body: GenerateWeekIn, db: AsyncSession = Depends(
 
     # upsert plan
     plan = (await db.execute(select(WeeklyPlan).where(
-        WeeklyPlan.user_id == USER_ID, WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
+        WeeklyPlan.user_id == user.id, WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
     ))).scalar_one_or_none()
     if plan is None:
-        plan = WeeklyPlan(user_id=USER_ID, iso_year=y, iso_week=w, week_start=ws)
+        plan = WeeklyPlan(user_id=user.id, iso_year=y, iso_week=w, week_start=ws)
         db.add(plan)
     plan.direction = data.get("direction")
     plan.goal_km = data.get("goal_km")
@@ -170,7 +174,7 @@ async def generate_weekly_plan(body: GenerateWeekIn, db: AsyncSession = Depends(
         if d not in existing:
             db.add(s)
     await db.commit()
-    return await _plan_payload(db, plan)
+    return await _plan_payload(db, plan, user.id)
 
 
 class AdjustIn(BaseModel):
@@ -178,14 +182,15 @@ class AdjustIn(BaseModel):
 
 
 @router.post("/weeks/current/adjust")
-async def adjust_current_week(body: AdjustIn, db: AsyncSession = Depends(get_db)):
+async def adjust_current_week(body: AdjustIn, user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
     today = date.today()
-    plan = await get_current_plan(db, today)
+    plan = await get_current_plan(db, today, user.id)
     if plan is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "이번 주 계획이 없습니다."})
 
     week_ctx = await render_week_context(db, plan)
-    history = await render_recent_history(db, days=14)
+    history = await render_recent_history(db, user.id, days=14)
     message = (f"{week_ctx}\n\n{history}\n\n오늘: {today}\n조정 사유: {body.reason}\n\n"
                "남은 세션 조정 JSON을 생성해 주세요.")
     try:
@@ -220,22 +225,23 @@ async def adjust_current_week(body: AdjustIn, db: AsyncSession = Depends(get_db)
         s.is_rest = bool(ch.get("is_rest"))
         changed.append(d.isoformat())
     await db.commit()
-    payload = await _plan_payload(db, plan)
+    payload = await _plan_payload(db, plan, user.id)
     payload["adjustment"] = {"reason": data.get("reason"), "changed": changed,
                              "kept": data.get("kept", [])}
     return payload
 
 
 @router.post("/weeks/current/evaluation")
-async def evaluate_current_week(db: AsyncSession = Depends(get_db)):
+async def evaluate_current_week(user: User = Depends(get_current_user),
+                                db: AsyncSession = Depends(get_db)):
     today = date.today()
-    plan = await get_current_plan(db, today)
+    plan = await get_current_plan(db, today, user.id)
     if plan is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "이번 주 계획이 없습니다."})
 
-    progress = await week_progress(db, plan, today)
+    progress = await week_progress(db, plan, today, user.id)
     week_ctx = await render_week_context(db, plan)
-    history = await render_recent_history(db, days=35)
+    history = await render_recent_history(db, user.id, days=35)
     is_partial = today.weekday() < 6
     message = (
         f"{week_ctx}\n\n{history}\n\n"
@@ -262,4 +268,4 @@ async def evaluate_current_week(db: AsyncSession = Depends(get_db)):
     ev.raw_md = json.dumps(data, ensure_ascii=False)
     db.add(ev)
     await db.commit()
-    return await _plan_payload(db, plan)
+    return await _plan_payload(db, plan, user.id)

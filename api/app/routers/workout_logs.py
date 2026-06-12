@@ -13,11 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
-from ..db import PlanSession, WorkoutLog, WorkoutReview, get_db
+from ..auth import get_current_user
+from ..db import PlanSession, User, WorkoutLog, WorkoutReview, get_db
 from ..prompts import WORKOUT_REVIEW_PROMPT
 from ..services import coach
 from ..services.context import (
-    KIND_LABELS, USER_ID, get_current_plan, render_profile_context,
+    KIND_LABELS, get_current_plan, render_profile_context,
     render_recent_history, render_session_line,
 )
 
@@ -64,9 +65,10 @@ def _log_dict(log: WorkoutLog) -> dict:
 
 
 @router.get("")
-async def list_logs(limit: int = 30, db: AsyncSession = Depends(get_db)):
+async def list_logs(limit: int = 30, user: User = Depends(get_current_user),
+                    db: AsyncSession = Depends(get_db)):
     res = await db.execute(
-        select(WorkoutLog).where(WorkoutLog.user_id == USER_ID)
+        select(WorkoutLog).where(WorkoutLog.user_id == user.id)
         .options(selectinload(WorkoutLog.review))
         .order_by(WorkoutLog.log_date.desc()).limit(limit)
     )
@@ -74,19 +76,20 @@ async def list_logs(limit: int = 30, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", status_code=201)
-async def create_log(body: LogIn, db: AsyncSession = Depends(get_db)):
+async def create_log(body: LogIn, user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
     # 자연키(user_id, log_date) upsert — 같은 날 재저장은 덮어쓰기
     existing = (await db.execute(select(WorkoutLog).where(
-        WorkoutLog.user_id == USER_ID, WorkoutLog.log_date == body.log_date,
+        WorkoutLog.user_id == user.id, WorkoutLog.log_date == body.log_date,
     ))).scalar_one_or_none()
-    log = existing or WorkoutLog(user_id=USER_ID, log_date=body.log_date, kind=body.kind)
+    log = existing or WorkoutLog(user_id=user.id, log_date=body.log_date, kind=body.kind)
     for k, v in body.model_dump().items():
         setattr(log, k, v)
     if existing is None:
         db.add(log)
 
     # 같은 날짜의 계획 세션과 매칭 → 상태 갱신 (통증 4+ → partial)
-    plan = await get_current_plan(db, body.log_date)
+    plan = await get_current_plan(db, body.log_date, user.id)
     session_status = None
     if plan:
         sess = (await db.execute(select(PlanSession).where(
@@ -102,8 +105,8 @@ async def create_log(body: LogIn, db: AsyncSession = Depends(get_db)):
             "created": existing is None}
 
 
-async def _build_review_message(db: AsyncSession, log: WorkoutLog) -> str:
-    plan = await get_current_plan(db, log.log_date)
+async def _build_review_message(db: AsyncSession, log: WorkoutLog, user_id: int) -> str:
+    plan = await get_current_plan(db, log.log_date, user_id)
     planned = "계획 없음 (즉흥 훈련)"
     if plan:
         sess = (await db.execute(select(PlanSession).where(
@@ -111,8 +114,8 @@ async def _build_review_message(db: AsyncSession, log: WorkoutLog) -> str:
         ))).scalar_one_or_none()
         if sess:
             planned = render_session_line(sess) + (f"\n메모: {sess.note}" if sess.note else "")
-    profile = await render_profile_context(db)
-    history = await render_recent_history(db)
+    profile = await render_profile_context(db, user_id)
+    history = await render_recent_history(db, user_id)
     actual = json.dumps(_log_dict(log), ensure_ascii=False)
     return (f"{profile}\n\n{history}\n\n## 오늘 계획\n{planned}\n\n"
             f"## 실제 수행 ({log.log_date}, {KIND_LABELS.get(log.kind, log.kind)})\n{actual}\n\n"
@@ -136,14 +139,15 @@ async def _save_review(db: AsyncSession, log: WorkoutLog, data: dict) -> Workout
 
 
 @router.post("/{log_id}/review")
-async def create_review(log_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+async def create_review(log_id: int, request: Request, user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
     log = (await db.execute(select(WorkoutLog).where(
-        WorkoutLog.id == log_id, WorkoutLog.user_id == USER_ID,
+        WorkoutLog.id == log_id, WorkoutLog.user_id == user.id,
     ).options(selectinload(WorkoutLog.review)))).scalar_one_or_none()
     if log is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "기록이 없습니다."})
 
-    message = await _build_review_message(db, log)
+    message = await _build_review_message(db, log, user.id)
     accept = request.headers.get("accept", "")
 
     if "text/event-stream" not in accept:

@@ -1,13 +1,28 @@
-// API 클라이언트 — fetch 래퍼 + SSE 리더
+// API 클라이언트 — fetch 래퍼 + SSE 리더 + 토큰(JWT) 관리
 const BASE = import.meta.env.VITE_API_BASE || '';
+const TOKEN_KEY = 'auth_token';
+
+export const getToken = () => localStorage.getItem(TOKEN_KEY);
+export const setToken = (t) => { if (t) localStorage.setItem(TOKEN_KEY, t); };
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+function authHeaders(extra = {}) {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}`, ...extra } : { ...extra };
+}
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(options.headers) },
     ...options,
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status === 401) {
+      // 토큰 만료/무효 → 로그아웃 신호. App이 받아 로그인 화면으로 전환.
+      clearToken();
+      window.dispatchEvent(new Event('auth:logout'));
+    }
     const detail = body?.detail || body?.error || {};
     const err = new Error(detail.message || `요청 실패 (${res.status})`);
     err.code = detail.code || 'ERROR';
@@ -18,6 +33,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  login: (email, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  me: () => request('/api/auth/me'),
+  onboard: (data) => request('/api/auth/onboard', { method: 'POST', body: JSON.stringify(data) }),
   today: () => request('/api/today'),
   profile: () => request('/api/profile'),
   patchProfile: (data) => request('/api/profile', { method: 'PATCH', body: JSON.stringify(data) }),
@@ -46,7 +64,7 @@ export async function streamReview(logId, { onToken, onDone, onError }) {
   try {
     const res = await fetch(`${BASE}/api/workout-logs/${logId}/review`, {
       method: 'POST',
-      headers: { Accept: 'text/event-stream' },
+      headers: authHeaders({ Accept: 'text/event-stream' }),
     });
     if (!res.ok || !res.body) throw new Error(`리뷰 생성 실패 (${res.status})`);
     const reader = res.body.getReader();

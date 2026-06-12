@@ -7,8 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..db import DailyPlan, Goal, PlanSession, WorkoutLog, get_db
-from ..services.context import USER_ID, WEEKDAYS_KO, get_current_plan, week_progress
+from ..auth import get_current_user
+from ..db import DailyPlan, Goal, PlanSession, User, WorkoutLog, get_db
+from ..services.context import WEEKDAYS_KO, get_current_plan, week_progress
 
 router = APIRouter(prefix="/api", tags=["today"])
 
@@ -26,9 +27,9 @@ def _session_dict(s: PlanSession | None) -> dict | None:
 
 
 @router.get("/today")
-async def get_today(db: AsyncSession = Depends(get_db)):
+async def get_today(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     today = date.today()
-    plan = await get_current_plan(db, today)
+    plan = await get_current_plan(db, today, user.id)
 
     session = None
     tomorrow_session = None
@@ -40,11 +41,11 @@ async def get_today(db: AsyncSession = Depends(get_db)):
         tomorrow_session = by_date.get(today + timedelta(days=1))
 
     log = (await db.execute(select(WorkoutLog).where(
-        WorkoutLog.user_id == USER_ID, WorkoutLog.log_date == today,
+        WorkoutLog.user_id == user.id, WorkoutLog.log_date == today,
     ).options(selectinload(WorkoutLog.review)))).scalar_one_or_none()
 
     daily = (await db.execute(select(DailyPlan).where(
-        DailyPlan.user_id == USER_ID, DailyPlan.plan_date == today,
+        DailyPlan.user_id == user.id, DailyPlan.plan_date == today,
     ))).scalar_one_or_none()
 
     # 상태 판정
@@ -61,13 +62,13 @@ async def get_today(db: AsyncSession = Depends(get_db)):
         state = "PRE_WORKOUT"      # S1
 
     # 일요일 + 모든 세션 종료 → WEEK_END
-    progress = await week_progress(db, plan, today)
+    progress = await week_progress(db, plan, today, user.id)
     if (plan and today.weekday() == 6 and progress["total"] > 0
             and state in ("REVIEWED", "REST_DAY")):
         state = "WEEK_END"         # S5
 
     goal = (await db.execute(select(Goal).where(
-        Goal.user_id == USER_ID, Goal.is_active == True,  # noqa: E712
+        Goal.user_id == user.id, Goal.is_active == True,  # noqa: E712
     ))).scalar_one_or_none()
     dday = (goal.target_date - today).days if goal and goal.target_date else None
 

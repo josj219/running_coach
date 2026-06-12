@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import AvailabilitySlot, get_db
-from ..services.context import USER_ID
+from ..auth import get_current_user
+from ..db import AvailabilitySlot, User, get_db
 
 router = APIRouter(prefix="/api/availability", tags=["availability"])
 
@@ -41,19 +41,20 @@ def _slot_dict(s: AvailabilitySlot) -> dict:
 
 
 @router.get("")
-async def get_availability(db: AsyncSession = Depends(get_db)):
+async def get_availability(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(AvailabilitySlot).where(
-        AvailabilitySlot.user_id == USER_ID,
+        AvailabilitySlot.user_id == user.id,
     ).order_by(AvailabilitySlot.sort, AvailabilitySlot.id))
     return {"slots": [_slot_dict(s) for s in res.scalars()]}
 
 
 @router.put("")
-async def put_availability(body: SlotsIn, db: AsyncSession = Depends(get_db)):
-    await db.execute(delete(AvailabilitySlot).where(AvailabilitySlot.user_id == USER_ID))
+async def put_availability(body: SlotsIn, user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    await db.execute(delete(AvailabilitySlot).where(AvailabilitySlot.user_id == user.id))
     for i, s in enumerate(body.slots):
-        db.add(AvailabilitySlot(user_id=USER_ID, days=s.days, title=s.title,
+        db.add(AvailabilitySlot(user_id=user.id, days=s.days, title=s.title,
                                 duration_min=s.duration_min, place=s.place,
                                 note=s.note, sort=i))
     await db.commit()
-    return await get_availability(db)
+    return await get_availability(user, db)

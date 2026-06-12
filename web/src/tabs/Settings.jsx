@@ -1,6 +1,6 @@
 // 설정 탭 — 프로필/목표/훈련 가능 시간/연동(Strava·Garmin)/화면/앱
 import React, { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, clearToken } from '../api.js';
 import { fmtDays, WEEK_DAYS } from '../workouts.js';
 import { Banner, Card, CTA, Icon, NavBarLarge, SectionLabel, Spinner } from '../components/Ui.jsx';
 
@@ -395,6 +395,9 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
               }} />
             <div style={{ borderTop: '0.5px solid var(--separator-non-opaque)' }} />
             <Row icon="Info" iconBg="var(--gray)" label="버전" value="2.0.0" />
+            <div style={{ borderTop: '0.5px solid var(--separator-non-opaque)' }} />
+            <Row icon="LogOut" iconBg="var(--accent-red)" label="로그아웃" danger
+              onClick={() => { clearToken(); window.dispatchEvent(new Event('auth:logout')); }} />
           </Card>
         </div>
       </div>

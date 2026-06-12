@@ -1,9 +1,8 @@
-"""초기 시드 — 멱등. 시작 시 사용자/프로필/목표/설정이 없으면 생성한다.
+"""데모 시드 — SEED_DEMO=1 일 때만 동작(로컬 개발·테스트용).
 
-값 출처: 20-knowledge-base/01_PROFILE.md · 02_GOAL.md · app_settings.json (v1).
-KNOWLEDGE_BASE_DIR로 app_settings.json 위치를 지정하면 그 값을 우선한다.
-이번 주 계획이 하나도 없으면 '기초 복귀 단계' 데모 주간 계획을 만들어
-앱이 빈 화면으로 시작하지 않게 한다(실사용 시 새 계획 생성으로 덮어씀).
+운영(도그푸딩)은 깨끗하게 시작한다: 계정은 `python -m app.create_user`로 생성하고,
+프로필은 첫 로그인 온보딩으로 입력한다. 따라서 기본값(플래그 없음)에서 seed()는 아무것도
+하지 않는다. SEED_DEMO=1 이면 로그인 가능한 데모 계정(고고조)과 데모 주간 계획을 만든다.
 """
 
 import json
@@ -13,12 +12,15 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .auth import hash_password
 from .db import (
     AppSettings, AvailabilitySlot, Goal, PlanSession, User, UserProfile, WeeklyPlan,
 )
 from .services.context import iso_week_of, week_start_of
 
 USER_ID = 1
+DEMO_EMAIL = "demo@coach.local"
+DEMO_PASSWORD = "demo-pass-1234"  # 로컬/테스트 전용
 
 
 def _load_v1_settings() -> dict:
@@ -31,11 +33,16 @@ def _load_v1_settings() -> dict:
 
 
 async def seed(db: AsyncSession) -> None:
+    # 운영은 데모 시드를 돌리지 않는다 — 계정은 create_user, 프로필은 온보딩.
+    if os.environ.get("SEED_DEMO") != "1":
+        return
+
     user = (await db.execute(select(User).where(User.id == USER_ID))).scalar_one_or_none()
     if user is None:
         v1 = _load_v1_settings()
         nickname = v1.get("nickname", "고고조")
-        db.add(User(id=USER_ID, email="josj219@gmail.com", nickname=nickname))
+        db.add(User(id=USER_ID, email=DEMO_EMAIL, nickname=nickname,
+                    password_hash=hash_password(DEMO_PASSWORD), onboarded=True))
         await db.flush()
         # 훈련 가능 시간은 availability_slots로 분리 — body_note에는 체형·부상 정보만
         db.add(UserProfile(
