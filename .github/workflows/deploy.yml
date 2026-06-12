@@ -29,6 +29,7 @@ jobs:
           cat > .env <<EOF
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
           CLAUDE_MODEL=claude-sonnet-4-6
           COACH_MOCK=
           TUNNEL_TOKEN=${{ secrets.TUNNEL_TOKEN }}
