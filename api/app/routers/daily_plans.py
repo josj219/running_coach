@@ -7,11 +7,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import DailyPlan, PlanSession, get_db
+from ..auth import get_current_user
+from ..db import DailyPlan, PlanSession, User, get_db
 from ..prompts import DAILY_PLAN_PROMPT
 from ..services import coach
 from ..services.context import (
-    USER_ID, get_current_plan, render_availability_context,
+    get_current_plan, render_availability_context,
     render_profile_context, render_recent_history, render_session_line,
 )
 
@@ -24,9 +25,10 @@ class DailyIn(BaseModel):
 
 
 @router.post("", status_code=201)
-async def generate_daily_plan(body: DailyIn, db: AsyncSession = Depends(get_db)):
+async def generate_daily_plan(body: DailyIn, user: User = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
     today = date.today()
-    plan = await get_current_plan(db, today)
+    plan = await get_current_plan(db, today, user.id)
     if plan is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "이번 주 계획이 없습니다."})
     sess = (await db.execute(select(PlanSession).where(
@@ -35,9 +37,9 @@ async def generate_daily_plan(body: DailyIn, db: AsyncSession = Depends(get_db))
     if sess is None:
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "오늘 계획된 세션이 없습니다."})
 
-    profile = await render_profile_context(db)
-    availability = await render_availability_context(db)
-    history = await render_recent_history(db, days=14)
+    profile = await render_profile_context(db, user.id)
+    availability = await render_availability_context(db, user.id)
+    history = await render_recent_history(db, user.id, days=14)
     message = (
         f"{profile}\n\n{availability}\n\n{history}\n\n"
         f"## 오늘 세션 (주간 계획)\n{render_session_line(sess)}\n"
@@ -52,8 +54,8 @@ async def generate_daily_plan(body: DailyIn, db: AsyncSession = Depends(get_db))
         raise HTTPException(503, {"code": "AI_UNAVAILABLE", "message": str(e)})
 
     daily = (await db.execute(select(DailyPlan).where(
-        DailyPlan.user_id == USER_ID, DailyPlan.plan_date == today,
-    ))).scalar_one_or_none() or DailyPlan(user_id=USER_ID, plan_date=today)
+        DailyPlan.user_id == user.id, DailyPlan.plan_date == today,
+    ))).scalar_one_or_none() or DailyPlan(user_id=user.id, plan_date=today)
     daily.session_id = sess.id
     daily.sections = {k: data.get(k) for k in ("warmup", "main", "cooldown", "note", "detail")}
     daily.is_adjusted = bool(data.get("adjusted"))

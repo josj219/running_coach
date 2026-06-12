@@ -10,8 +10,6 @@ from ..db import (
     WeeklyPlan, WorkoutLog,
 )
 
-USER_ID = 1  # v2.0 단일 사용자
-
 KIND_LABELS = {
     "easy": "이지 런", "interval": "인터벌", "tempo": "템포 런", "long": "롱런",
     "race": "대회", "rest": "휴식", "strength": "근력·보강", "drill": "드릴",
@@ -29,18 +27,18 @@ def iso_week_of(d: date) -> tuple[int, int]:
     return iso.year, iso.week
 
 
-async def get_current_plan(db: AsyncSession, d: date) -> WeeklyPlan | None:
+async def get_current_plan(db: AsyncSession, d: date, user_id: int) -> WeeklyPlan | None:
     y, w = iso_week_of(d)
     res = await db.execute(
         select(WeeklyPlan).where(
-            WeeklyPlan.user_id == USER_ID,
+            WeeklyPlan.user_id == user_id,
             WeeklyPlan.iso_year == y, WeeklyPlan.iso_week == w,
         )
     )
     return res.scalar_one_or_none()
 
 
-async def week_progress(db: AsyncSession, plan: WeeklyPlan | None, d: date) -> dict:
+async def week_progress(db: AsyncSession, plan: WeeklyPlan | None, d: date, user_id: int) -> dict:
     """수행률 단일 정의: 분모 = 휴식 제외 세션 수, 분자 = done/partial."""
     if plan is None:
         return {"done": 0, "total": 0, "completion_rate": 0, "week_km": 0.0, "goal_km": None, "days_km": [0] * 7}
@@ -53,7 +51,7 @@ async def week_progress(db: AsyncSession, plan: WeeklyPlan | None, d: date) -> d
     ws = plan.week_start
     res = await db.execute(
         select(WorkoutLog).where(
-            WorkoutLog.user_id == USER_ID,
+            WorkoutLog.user_id == user_id,
             WorkoutLog.log_date >= ws,
             WorkoutLog.log_date <= ws + timedelta(days=6),
         )
@@ -71,13 +69,13 @@ async def week_progress(db: AsyncSession, plan: WeeklyPlan | None, d: date) -> d
     }
 
 
-async def render_profile_context(db: AsyncSession) -> str:
-    user = (await db.execute(select(User).where(User.id == USER_ID))).scalar_one_or_none()
-    prof = (await db.execute(select(UserProfile).where(UserProfile.user_id == USER_ID))).scalar_one_or_none()
+async def render_profile_context(db: AsyncSession, user_id: int) -> str:
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    prof = (await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))).scalar_one_or_none()
     goal = (await db.execute(
-        select(Goal).where(Goal.user_id == USER_ID, Goal.is_active == True)  # noqa: E712
+        select(Goal).where(Goal.user_id == user_id, Goal.is_active == True)  # noqa: E712
     )).scalar_one_or_none()
-    settings = (await db.execute(select(AppSettings).where(AppSettings.user_id == USER_ID))).scalar_one_or_none()
+    settings = (await db.execute(select(AppSettings).where(AppSettings.user_id == user_id))).scalar_one_or_none()
 
     lines = ["## 사용자 프로필"]
     if user:
@@ -101,10 +99,10 @@ async def render_profile_context(db: AsyncSession) -> str:
     return "\n".join(lines)
 
 
-async def render_availability_context(db: AsyncSession) -> str:
+async def render_availability_context(db: AsyncSession, user_id: int) -> str:
     """정기 훈련 가능 시간(기본 시간표)을 AI 컨텍스트로 직렬화."""
     res = await db.execute(select(AvailabilitySlot).where(
-        AvailabilitySlot.user_id == USER_ID,
+        AvailabilitySlot.user_id == user_id,
     ).order_by(AvailabilitySlot.sort, AvailabilitySlot.id))
     slots = list(res.scalars())
     if not slots:
@@ -120,10 +118,10 @@ async def render_availability_context(db: AsyncSession) -> str:
     return "\n".join(lines)
 
 
-async def render_recent_history(db: AsyncSession, days: int = 28) -> str:
+async def render_recent_history(db: AsyncSession, user_id: int, days: int = 28) -> str:
     since = date.today() - timedelta(days=days)
     res = await db.execute(
-        select(WorkoutLog).where(WorkoutLog.user_id == USER_ID, WorkoutLog.log_date >= since)
+        select(WorkoutLog).where(WorkoutLog.user_id == user_id, WorkoutLog.log_date >= since)
         .order_by(WorkoutLog.log_date.desc()).limit(30)
     )
     logs = list(res.scalars())

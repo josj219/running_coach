@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .db import SessionLocal, init_db
 from .routers import (
-    availability, daily_plans, integrations, profile, today, weeks, workout_logs,
+    auth, availability, daily_plans, integrations, profile, today, weeks, workout_logs,
 )
 from .seed import seed
 
@@ -44,6 +44,7 @@ async def health():
     return {"status": "ok"}
 
 
+app.include_router(auth.router)
 app.include_router(profile.router)
 app.include_router(availability.router)
 app.include_router(today.router)

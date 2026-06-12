@@ -12,24 +12,24 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import _decode_user_id, create_token, get_current_user
 from ..config import get_settings
-from ..db import ExternalActivity, Integration, get_db
+from ..db import ExternalActivity, Integration, User, get_db
 from ..services import strava
-from ..services.context import USER_ID
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
 
-async def _get_integration(db: AsyncSession, provider: str) -> Integration | None:
+async def _get_integration(db: AsyncSession, provider: str, user_id: int) -> Integration | None:
     return (await db.execute(select(Integration).where(
-        Integration.user_id == USER_ID, Integration.provider == provider,
+        Integration.user_id == user_id, Integration.provider == provider,
     ))).scalar_one_or_none()
 
 
 @router.get("")
-async def list_integrations(db: AsyncSession = Depends(get_db)):
-    st = await _get_integration(db, "strava")
-    ga = await _get_integration(db, "garmin")
+async def list_integrations(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    st = await _get_integration(db, "strava", user.id)
+    ga = await _get_integration(db, "garmin", user.id)
     s = get_settings()
     return {
         "strava": {
@@ -49,26 +49,29 @@ async def list_integrations(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/strava/authorize-url")
-async def strava_authorize_url():
+async def strava_authorize_url(user: User = Depends(get_current_user)):
     s = get_settings()
     redirect_uri = f"{s.api_base_url}/api/integrations/strava/callback"
     try:
-        return {"url": strava.authorize_url(redirect_uri)}
+        # state에 서명된 사용자 토큰을 실어 콜백(브라우저 리다이렉트)에서 사용자 식별
+        return {"url": strava.authorize_url(redirect_uri, state=create_token(user.id))}
     except strava.StravaError as e:
         raise HTTPException(503, {"code": "INTEGRATION_UNAVAILABLE", "message": str(e)})
 
 
 @router.get("/strava/callback")
-async def strava_callback(code: str = "", error: str = "", db: AsyncSession = Depends(get_db)):
+async def strava_callback(code: str = "", error: str = "", state: str = "",
+                          db: AsyncSession = Depends(get_db)):
     s = get_settings()
-    if error or not code:
+    if error or not code or not state:
         return RedirectResponse(f"{s.web_base_url}/?strava=denied")
+    user_id = _decode_user_id(state)  # 서명 검증 실패 시 401
     try:
         data = await strava.exchange_code(code)
     except strava.StravaError as e:
         raise HTTPException(502, {"code": "INTEGRATION_ERROR", "message": str(e)})
 
-    integ = await _get_integration(db, "strava") or Integration(user_id=USER_ID, provider="strava")
+    integ = await _get_integration(db, "strava", user_id) or Integration(user_id=user_id, provider="strava")
     integ.access_token = data["access_token"]
     integ.refresh_token = data["refresh_token"]
     integ.expires_at = data["expires_at"]
@@ -79,19 +82,19 @@ async def strava_callback(code: str = "", error: str = "", db: AsyncSession = De
     await db.commit()
     # 연결 직후 1회 동기화 (실패해도 연결은 유지)
     try:
-        await strava.sync_activities(db, integ, USER_ID)
+        await strava.sync_activities(db, integ, user_id)
     except strava.StravaError:
         pass
     return RedirectResponse(f"{s.web_base_url}/?strava=connected")
 
 
 @router.post("/strava/sync")
-async def strava_sync(db: AsyncSession = Depends(get_db)):
-    integ = await _get_integration(db, "strava")
+async def strava_sync(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    integ = await _get_integration(db, "strava", user.id)
     if integ is None or not integ.access_token:
         raise HTTPException(404, {"code": "NOT_CONNECTED", "message": "Strava가 연결되어 있지 않습니다."})
     try:
-        added = await strava.sync_activities(db, integ, USER_ID)
+        added = await strava.sync_activities(db, integ, user.id)
     except strava.StravaError as e:
         raise HTTPException(502, {"code": "INTEGRATION_ERROR", "message": str(e)})
     return {"added": added}
@@ -110,16 +113,17 @@ def _activity_dict(a: ExternalActivity) -> dict:
 
 
 @router.get("/strava/activities")
-async def strava_activities(limit: int = 5, db: AsyncSession = Depends(get_db)):
+async def strava_activities(limit: int = 5, user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
     """최근 활동 — 기록 입력 자동 채움용. 호출 시 자동으로 한번 동기화 시도."""
-    integ = await _get_integration(db, "strava")
+    integ = await _get_integration(db, "strava", user.id)
     if integ and integ.access_token:
         try:
-            await strava.sync_activities(db, integ, USER_ID)
+            await strava.sync_activities(db, integ, user.id)
         except strava.StravaError:
             pass  # 캐시로 응답
     res = await db.execute(select(ExternalActivity).where(
-        ExternalActivity.user_id == USER_ID,
+        ExternalActivity.user_id == user.id,
     ).order_by(ExternalActivity.start_date.desc()).limit(limit))
     return {"items": [_activity_dict(a) for a in res.scalars()]}
 
@@ -129,8 +133,8 @@ class DisconnectBody(BaseModel):
 
 
 @router.delete("/strava")
-async def strava_disconnect(db: AsyncSession = Depends(get_db)):
-    integ = await _get_integration(db, "strava")
+async def strava_disconnect(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    integ = await _get_integration(db, "strava", user.id)
     if integ:
         await db.delete(integ)
         await db.commit()

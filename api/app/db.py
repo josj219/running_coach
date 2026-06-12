@@ -41,7 +41,9 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String, unique=True)
-    nickname: Mapped[str] = mapped_column(String, default="고고조")
+    nickname: Mapped[str] = mapped_column(String, default="러너")
+    password_hash: Mapped[str | None] = mapped_column(String)  # bcrypt. 계정 생성 시 채워짐
+    onboarded: Mapped[bool] = mapped_column(Boolean, default=False)  # 첫 로그인 프로필 입력 완료 여부
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -260,7 +262,11 @@ async def get_db():
 
 
 # create_all은 기존 테이블에 새 컬럼을 추가하지 않는다 — Alembic 도입 전 경량 마이그레이션
-_ADDED_COLUMNS = [("workout_reviews", "summary", "TEXT")]
+_ADDED_COLUMNS = [
+    ("workout_reviews", "summary", "TEXT"),
+    ("users", "password_hash", "TEXT"),
+    ("users", "onboarded", "BOOLEAN DEFAULT FALSE"),
+]
 
 
 async def init_db():
