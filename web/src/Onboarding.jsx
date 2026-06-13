@@ -1,5 +1,5 @@
 // 첫 로그인 온보딩 — 프로필·목표·기본 시간표를 한 번에 입력한다.
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { api } from './api.js';
 import { Banner, Card, CTA, Icon, SectionLabel } from './components/Ui.jsx';
 import { WEEK_DAYS } from './workouts.js';
@@ -10,22 +10,76 @@ const inputS = {
   borderRadius: 11, padding: '11px 13px', fontSize: 16, color: 'var(--label-primary)',
 };
 
-function Field({ label, value, onChange, placeholder, type = 'text', mode = 'text' }) {
+function Field({ label, value, onChange, placeholder, type = 'text', mode = 'text', maxLength }) {
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--label-secondary)', marginBottom: 5 }}>{label}</div>
       <input type={type} inputMode={mode} value={value} placeholder={placeholder}
+        maxLength={maxLength}
         onChange={(e) => onChange(e.target.value)} style={inputS} />
     </div>
   );
 }
 
+// HH:MM:SS 세그먼트 입력 — 각 칸은 숫자 키보드, 2자리 입력 시 다음 칸으로 자동 이동
+function TimeInput({ label, value, onChange }) {
+  const parts = (value || '').split(':');
+  const [h, setH] = useState(parts[0] || '');
+  const [m, setM] = useState(parts[1] || '');
+  const [s, setS] = useState(parts[2] || '');
+  const mRef = useRef();
+  const sRef = useRef();
+
+  const emit = (nh, nm, ns) => {
+    if (!nh && !nm && !ns) { onChange(''); return; }
+    onChange(`${(nh || '0').padStart(2, '0')}:${(nm || '0').padStart(2, '0')}:${(ns || '0').padStart(2, '0')}`);
+  };
+
+  const segS = {
+    width: 36, border: 'none', outline: 'none', background: 'none',
+    fontSize: 18, fontWeight: 700, color: 'var(--label-primary)',
+    textAlign: 'center', padding: 0,
+  };
+  const colonS = { fontSize: 18, fontWeight: 700, color: 'var(--label-secondary)', userSelect: 'none' };
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--label-secondary)', marginBottom: 5 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--fill-tertiary)',
+        borderRadius: 11, padding: '11px 13px' }}>
+        <input inputMode="numeric" maxLength={2} value={h} placeholder="00" style={segS}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setH(v); emit(v, m, s);
+            if (v.length === 2) mRef.current?.focus();
+          }} />
+        <span style={colonS}>:</span>
+        <input ref={mRef} inputMode="numeric" maxLength={2} value={m} placeholder="00" style={segS}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setM(v); emit(h, v, s);
+            if (v.length === 2) sRef.current?.focus();
+          }} />
+        <span style={colonS}>:</span>
+        <input ref={sRef} inputMode="numeric" maxLength={2} value={s} placeholder="00" style={segS}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setS(v); emit(h, m, v);
+          }} />
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: 'var(--label-tertiary)' }}>시간 : 분 : 초</span>
+      </div>
+    </div>
+  );
+}
+
 const EMPTY_SLOT = { days: [], title: '', duration_min: '', place: '야외' };
+const CURRENT_YEAR = new Date().getFullYear();
 
 export default function Onboarding({ user, onDone }) {
   const [f, setF] = useState({
     nickname: user?.nickname && user.nickname !== '러너' ? user.nickname : '',
-    height_cm: '', weight_kg: '', age: '', career_years: '',
+    height_cm: '', weight_kg: '', birth_year: '', career_years: '',
     pb_10k: '', pb_half: '', pb_full: '',
     race_type: '', target_time: '', target_date: '', weekly_goal_km: '',
   });
@@ -47,11 +101,12 @@ export default function Onboarding({ user, onDone }) {
     if (!f.nickname.trim()) { setError('닉네임은 꼭 입력해주세요.'); return; }
     setBusy(true); setError(null);
     const num = (v) => (v === '' || v == null ? null : parseFloat(v));
+    const age = f.birth_year ? CURRENT_YEAR - parseInt(f.birth_year, 10) : null;
     try {
       const me = await api.onboard({
         nickname: f.nickname.trim(),
         height_cm: num(f.height_cm), weight_kg: num(f.weight_kg),
-        age: f.age ? parseInt(f.age, 10) : null, career_years: num(f.career_years),
+        age, career_years: num(f.career_years),
         pb_10k: f.pb_10k || null, pb_half: f.pb_half || null, pb_full: f.pb_full || null,
         race_type: f.race_type || null, target_time: f.target_time || null,
         target_date: f.target_date || null, weekly_goal_km: num(f.weekly_goal_km),
@@ -84,24 +139,26 @@ export default function Onboarding({ user, onDone }) {
               <div style={{ flex: 1 }}><Field label="체중 (kg)" value={f.weight_kg} mode="decimal" onChange={set('weight_kg')} placeholder="72" /></div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1 }}><Field label="나이" value={f.age} mode="numeric" onChange={set('age')} placeholder="35" /></div>
+              <div style={{ flex: 1 }}><Field label="출생 연도" value={f.birth_year} mode="numeric" maxLength={4} onChange={set('birth_year')} placeholder="1990" /></div>
               <div style={{ flex: 1 }}><Field label="러닝 경력 (년)" value={f.career_years} mode="decimal" onChange={set('career_years')} placeholder="2" /></div>
             </div>
           </Card>
 
           <SectionLabel>개인 기록 (PB · 선택)</SectionLabel>
           <Card pad={16} style={{ marginBottom: 16 }}>
-            <Field label="10K" value={f.pb_10k} onChange={set('pb_10k')} placeholder="00:42:13" />
-            <Field label="하프" value={f.pb_half} onChange={set('pb_half')} placeholder="01:38:00" />
-            <Field label="풀" value={f.pb_full} onChange={set('pb_full')} placeholder="03:51:00" />
+            <TimeInput label="10K" value={f.pb_10k} onChange={set('pb_10k')} />
+            <TimeInput label="하프" value={f.pb_half} onChange={set('pb_half')} />
+            <TimeInput label="풀" value={f.pb_full} onChange={set('pb_full')} />
           </Card>
 
           <SectionLabel>목표 (선택)</SectionLabel>
           <Card pad={16} style={{ marginBottom: 16 }}>
             <Field label="대회 종류" value={f.race_type} onChange={set('race_type')} placeholder="풀마라톤" />
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1 }}><Field label="목표 기록" value={f.target_time} onChange={set('target_time')} placeholder="03:30:00" /></div>
-              <div style={{ flex: 1 }}><Field label="대회 날짜" value={f.target_date} onChange={set('target_date')} placeholder="2026-11-01" /></div>
+            <TimeInput label="목표 기록" value={f.target_time} onChange={set('target_time')} />
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--label-secondary)', marginBottom: 5 }}>대회 날짜</div>
+              <input type="date" value={f.target_date} onChange={(e) => set('target_date')(e.target.value)}
+                style={{ ...inputS, WebkitAppearance: 'none', appearance: 'none', colorScheme: 'light dark' }} />
             </div>
             <Field label="주간 목표 거리 (km)" value={f.weekly_goal_km} mode="decimal" onChange={set('weekly_goal_km')} placeholder="45" />
           </Card>

@@ -1,8 +1,62 @@
 // 설정 탭 — 프로필/목표/훈련 가능 시간/연동(Strava·Garmin)/화면/앱
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api, clearToken } from '../api.js';
 import { fmtDays, WEEK_DAYS } from '../workouts.js';
 import { Banner, Card, CTA, Icon, NavBarLarge, SectionLabel, Spinner } from '../components/Ui.jsx';
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+// HH:MM:SS 세그먼트 입력
+function TimeInput({ label, value, onChange }) {
+  const parts = (value || '').split(':');
+  const [h, setH] = useState(parts[0] || '');
+  const [m, setM] = useState(parts[1] || '');
+  const [s, setS] = useState(parts[2] || '');
+  const mRef = useRef();
+  const sRef = useRef();
+
+  const emit = (nh, nm, ns) => {
+    if (!nh && !nm && !ns) { onChange(''); return; }
+    onChange(`${(nh || '0').padStart(2, '0')}:${(nm || '0').padStart(2, '0')}:${(ns || '0').padStart(2, '0')}`);
+  };
+
+  const segS = {
+    width: 36, border: 'none', outline: 'none', background: 'none',
+    fontSize: 18, fontWeight: 700, color: 'var(--label-primary)',
+    textAlign: 'center', padding: 0,
+  };
+  const colonS = { fontSize: 18, fontWeight: 700, color: 'var(--label-secondary)', userSelect: 'none' };
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--label-secondary)', marginBottom: 5 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--fill-tertiary)',
+        borderRadius: 11, padding: '11px 13px' }}>
+        <input inputMode="numeric" maxLength={2} value={h} placeholder="00" style={segS}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setH(v); emit(v, m, s);
+            if (v.length === 2) mRef.current?.focus();
+          }} />
+        <span style={colonS}>:</span>
+        <input ref={mRef} inputMode="numeric" maxLength={2} value={m} placeholder="00" style={segS}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setM(v); emit(h, v, s);
+            if (v.length === 2) sRef.current?.focus();
+          }} />
+        <span style={colonS}>:</span>
+        <input ref={sRef} inputMode="numeric" maxLength={2} value={s} placeholder="00" style={segS}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setS(v); emit(h, m, v);
+          }} />
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: 'var(--label-tertiary)' }}>시간 : 분 : 초</span>
+      </div>
+    </div>
+  );
+}
 
 const PLACES = ['실내 헬스장', '야외', '트레드밀', '기타'];
 const EMPTY_SLOT = { days: [], title: '', duration_min: '', place: '야외', note: '' };
@@ -152,11 +206,12 @@ function Row({ icon, iconBg, label, value, onClick, danger }) {
   );
 }
 
-function EditField({ label, value, onChange, placeholder, mode = 'text' }) {
+function EditField({ label, value, onChange, placeholder, mode = 'text', maxLength }) {
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--label-secondary)', marginBottom: 5 }}>{label}</div>
       <input type="text" inputMode={mode} value={value ?? ''} placeholder={placeholder}
+        maxLength={maxLength}
         onChange={(e) => onChange(e.target.value)}
         style={{ width: '100%', border: 'none', outline: 'none', background: 'var(--fill-tertiary)',
           borderRadius: 11, padding: '11px 13px', fontSize: 16, color: 'var(--label-primary)' }} />
@@ -195,8 +250,9 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
   if (!profile || !settings) return <div><NavBarLarge title="설정" /><Spinner /></div>;
 
   const saveProfile = async () => {
+    const age = form.birth_year ? CURRENT_YEAR - parseInt(form.birth_year, 10) : null;
     await api.patchProfile({
-      nickname: form.nickname, age: parseInt(form.age, 10) || null,
+      nickname: form.nickname, age,
       career_years: parseFloat(form.career_years) || null,
       height_cm: parseFloat(form.height_cm) || null, weight_kg: parseFloat(form.weight_kg) || null,
       pb_10k: form.pb_10k || null, pb_half: form.pb_half || null, pb_full: form.pb_full || null,
@@ -225,7 +281,7 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
         {/* 프로필 */}
         <div>
           <SectionLabel trailing={
-            <button onClick={() => { setForm(profile); setEditing(editing === 'profile' ? null : 'profile'); }}
+            <button onClick={() => { setForm({ ...profile, birth_year: profile.age ? String(CURRENT_YEAR - profile.age) : '' }); setEditing(editing === 'profile' ? null : 'profile'); }}
               style={{ background: 'none', border: 'none', color: 'var(--tint)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
               {editing === 'profile' ? '취소' : '편집'}</button>}>프로필</SectionLabel>
           <Card pad={editing === 'profile' ? 16 : 0}>
@@ -237,12 +293,12 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
                   <div style={{ flex: 1 }}><EditField label="체중 (kg)" value={form.weight_kg} mode="decimal" onChange={(v) => setForm({ ...form, weight_kg: v })} /></div>
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <div style={{ flex: 1 }}><EditField label="나이" value={form.age} mode="numeric" onChange={(v) => setForm({ ...form, age: v })} /></div>
+                  <div style={{ flex: 1 }}><EditField label="출생 연도" value={form.birth_year} mode="numeric" maxLength={4} onChange={(v) => setForm({ ...form, birth_year: v })} placeholder="1990" /></div>
                   <div style={{ flex: 1 }}><EditField label="러닝 경력 (년)" value={form.career_years} mode="decimal" onChange={(v) => setForm({ ...form, career_years: v })} /></div>
                 </div>
-                <EditField label="10K PB (00:42:13)" value={form.pb_10k} onChange={(v) => setForm({ ...form, pb_10k: v })} />
-                <EditField label="하프 PB" value={form.pb_half} onChange={(v) => setForm({ ...form, pb_half: v })} />
-                <EditField label="풀 PB" value={form.pb_full} onChange={(v) => setForm({ ...form, pb_full: v })} />
+                <TimeInput label="10K PB" value={form.pb_10k} onChange={(v) => setForm({ ...form, pb_10k: v })} />
+                <TimeInput label="하프 PB" value={form.pb_half} onChange={(v) => setForm({ ...form, pb_half: v })} />
+                <TimeInput label="풀 PB" value={form.pb_full} onChange={(v) => setForm({ ...form, pb_full: v })} />
                 <CTA icon="Check" onClick={saveProfile}>저장</CTA>
               </div>
             ) : (
@@ -282,8 +338,14 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
             {editing === 'goal' ? (
               <div className="anim-in">
                 <EditField label="대회 종류" value={form.race_type} placeholder="풀마라톤" onChange={(v) => setForm({ ...form, race_type: v })} />
-                <EditField label="목표 기록 (03:30:00)" value={form.target_time} onChange={(v) => setForm({ ...form, target_time: v })} />
-                <EditField label="대회 날짜 (2026-11-01)" value={form.target_date} onChange={(v) => setForm({ ...form, target_date: v })} />
+                <TimeInput label="목표 기록" value={form.target_time} onChange={(v) => setForm({ ...form, target_time: v })} />
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--label-secondary)', marginBottom: 5 }}>대회 날짜</div>
+                  <input type="date" value={form.target_date || ''} onChange={(e) => setForm({ ...form, target_date: e.target.value })}
+                    style={{ width: '100%', border: 'none', outline: 'none', background: 'var(--fill-tertiary)',
+                      borderRadius: 11, padding: '11px 13px', fontSize: 16, color: 'var(--label-primary)',
+                      WebkitAppearance: 'none', appearance: 'none', colorScheme: 'light dark' }} />
+                </div>
                 <CTA icon="Check" onClick={saveGoal}>저장</CTA>
               </div>
             ) : (
