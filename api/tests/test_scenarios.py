@@ -90,6 +90,26 @@ async def test_08_validation_error(client):
     assert r.status_code == 422
 
 
+async def test_08b_analyze_image_returns_metrics(client):
+    """이미지 분석 → 추출 수치 반환(COACH_MOCK). DB 저장은 하지 않는다."""
+    # 1x1 투명 PNG (base64) — mock 분기라 내용은 무관
+    px = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+          "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+    r = await client.post("/api/workout-logs/analyze-image",
+                          json={"image_b64": px, "media_type": "image/png"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is True
+    assert body["distance_km"] == 5.2 and body["avg_hr"] == 145
+    # 분석은 저장하지 않는다 — 이미지 호출만으로 로그가 늘지 않아야 한다
+    assert "id" not in body
+
+
+async def test_08c_analyze_image_requires_b64(client):
+    r = await client.post("/api/workout-logs/analyze-image", json={"image_b64": ""})
+    assert r.status_code == 422
+
+
 async def test_09_week_progress_updated(client):
     """기록 저장 후 주간 거리·수행률 반영 (단일 정의)."""
     body = (await client.get("/api/weeks/current")).json()
@@ -180,6 +200,35 @@ async def test_15_pain_marks_session_partial(client):
         "distance_km": 3, "feel": 2, "pain_part": "무릎", "pain_level": 5,
     })
     assert r.json()["session_status"] == "partial"
+
+
+# ── 과거 일자 백필 (어제 깜빡한 기록) ─────────────────────────────────────
+
+async def test_15b_backfill_past_date_attaches_log(client):
+    """과거 일자 기록 → 주간 payload의 해당 세션에 log가 첨부되고 상태가 갱신된다.
+
+    주간 탭에서 지난 날을 눌러 기록하는 UX의 백엔드 계약.
+    """
+    week = (await client.get("/api/weeks/current")).json()
+    # 모든 세션 dict에 log 키가 존재(미기록 시 None)
+    assert all("log" in s for s in week["sessions"])
+    target = next((s for s in week["sessions"]
+                   if s["session_date"] < today_str() and s["log"] is None), None)
+    if target is None:  # 주 초반 실행 등 과거 미기록 세션이 없으면 스킵
+        return
+    r = await client.post("/api/workout-logs", json={
+        "log_date": target["session_date"], "kind": target["kind"] or "easy",
+        "distance_km": 6.0, "duration_sec": 2160, "avg_pace": "6:00", "feel": 3,
+    })
+    assert r.status_code == 201
+    assert r.json()["created"] is True
+
+    week2 = (await client.get("/api/weeks/current")).json()
+    s2 = next(s for s in week2["sessions"] if s["session_date"] == target["session_date"])
+    assert s2["log"] is not None
+    assert s2["log"]["distance_km"] == 6.0
+    assert s2["log"]["avg_pace"] == "6:00"
+    assert s2["status"] in ("done", "partial")  # 과거여도 매칭 세션 상태 갱신
 
 
 # ── AI 생성 경로: 주간 계획 / 조정 / 평가 / 당일 카드 ─────────────────────

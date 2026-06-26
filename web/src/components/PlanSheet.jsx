@@ -1,7 +1,8 @@
 // 주간 계획 생성 모달 — 기본 시간표 확인 → 이번 주 특이 일정 입력 → AI 생성.
 // 주의 첫 실행(계획 없음) 시 자동으로 열린다 (App.jsx).
 import React, { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, genResult } from '../api.js';
+import { pendingGen, pollUntil, reconcileOnce } from '../recover.js';
 import { fmtDays } from '../workouts.js';
 import { Banner, Card, CTA, Icon, Modal } from './Ui.jsx';
 
@@ -42,10 +43,21 @@ export default function PlanSheet({ onClose, onDone, goSettings }) {
 
   const generate = async () => {
     setBusy(true); setError(null);
+    pendingGen.set({ type: 'weekly' });  // 끊겨도 재진입 시 복구할 수 있게 의도 기록
     try {
       await api.generateWeek({ schedule_note: special, condition_note: condition });
+      pendingGen.clear();
       onDone();
-    } catch (e) { setError(e.message); setBusy(false); }
+    } catch (e) {
+      if (e.code === 'NETWORK') {
+        // 연결만 끊겼다 — 서버는 끝냈을 수 있으니 결과를 폴링해 복구.
+        const r = await reconcileOnce(() => pollUntil(() => genResult({ type: 'weekly' })));
+        if (r === 'found') { pendingGen.clear(); onDone(); return; }
+        if (r === 'busy') { setBusy(false); return; }  // App 복구 핸들러가 결과 처리
+      }
+      pendingGen.clear();
+      setError(e.message); setBusy(false);
+    }
   };
 
   return (

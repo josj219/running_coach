@@ -1,10 +1,36 @@
 // 훈련 기록 입력 모달 + AI 리뷰 스트리밍.
 // UX: Strava 자동 채움 → 필수 입력은 거리·시간·몸상태 3개뿐. 나머지는 '자세히'에 접어둠.
-// '오늘 달리지 않았어요' 체크 시 수치 입력을 숨기고 소감(직접 기록) 기반으로 저장한다.
-import React, { useEffect, useMemo, useState } from 'react';
+// '달리지 않았어요' 체크 시 수치 입력을 숨기고 소감(직접 기록) 기반으로 저장한다.
+// 오늘뿐 아니라 임의의 과거 일자(logDate)도 기록·수정 가능 — 어제 기록을 깜빡한 경우 대비.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, streamReview } from '../api.js';
-import { autoPace, BODY_PARTS, FEEL_OPTIONS, parseTimeToSec, wmeta } from '../workouts.js';
+import { autoPace, BODY_PARTS, FEEL_OPTIONS, localISO, parseTimeToSec, wmeta } from '../workouts.js';
 import { Banner, Card, CTA, Icon, MetricRow, Modal, RecoveryBadge } from './Ui.jsx';
+
+const NORUN_PREFIX = '(달리기 기록 없음 — 직접 기록) ';
+
+// 'YYYY-MM-DD' → '6월 18일 (목)' (로컬 기준 — Date(iso)의 UTC 파싱 하루 밀림 방지)
+function fmtDateLabel(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const wd = ['일', '월', '화', '수', '목', '금', '토'][new Date(y, m - 1, d).getDay()];
+  return `${m}월 ${d}일 (${wd})`;
+}
+
+// 기존 기록 → 폼 초기값 (과거 일자 수정 시 무손실 프리필)
+function formFromLog(log) {
+  const dur = log?.duration_sec || 0;
+  return {
+    distance: log?.distance_km ? String(log.distance_km) : '',
+    minutes: dur ? String(Math.floor(dur / 60)) : '',
+    seconds: dur ? String(dur % 60) : '',
+    pace: log?.avg_pace || '',
+    avgHr: log?.avg_hr ? String(log.avg_hr) : '',
+    maxHr: log?.max_hr ? String(log.max_hr) : '',
+    cadence: log?.cadence ? String(log.cadence) : '',
+    feel: log?.feel || 3,
+    note: (log?.user_comment || '').replace(NORUN_PREFIX, ''),
+  };
+}
 
 function FieldLabel({ children }) {
   return <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label-secondary)',
@@ -19,6 +45,82 @@ function NumInput({ value, onChange, placeholder, unit, flex = 1, mode = 'decima
         style={{ border: 'none', outline: 'none', background: 'none', flex: 1, fontFamily: 'var(--font-display)',
           fontSize: 22, fontWeight: 700, color: 'var(--label-primary)', letterSpacing: '-0.5px', width: '100%', minWidth: 0 }} />
       {unit && <span style={{ fontSize: 14, color: 'var(--label-tertiary)', fontWeight: 600, marginLeft: 4 }}>{unit}</span>}
+    </div>
+  );
+}
+
+// 파일 이미지를 캔버스로 축소(긴 변 1600px)한 뒤 base64(jpeg)로 변환.
+// 업로드 크기와 Claude 비전 입력 한도를 함께 줄인다.
+async function fileToScaledB64(file, maxEdge = 1600, quality = 0.85) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('파일을 읽지 못했어요.'));
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('이미지를 열지 못했어요.'));
+    im.src = dataUrl;
+  });
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  return { b64: canvas.toDataURL('image/jpeg', quality).split(',')[1], mediaType: 'image/jpeg' };
+}
+
+// 워치/러닝앱 스크린샷 → AI 분석 → 폼 자동 채움
+function ImageImport({ onExtract }) {
+  const [state, setState] = useState('idle'); // idle | analyzing | error
+  const [err, setErr] = useState(null);
+  const inputRef = useRef(null);
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';  // 같은 파일 재선택 허용
+    if (!file) return;
+    setState('analyzing'); setErr(null);
+    try {
+      const { b64, mediaType } = await fileToScaledB64(file);
+      const data = await api.analyzeImage(b64, mediaType);
+      if (data.found === false) {
+        setState('error');
+        setErr('러닝 기록 화면을 인식하지 못했어요. 다른 이미지를 올리거나 직접 입력해 주세요.');
+        return;
+      }
+      onExtract(data);
+      setState('idle');
+    } catch (e2) {
+      setState('error');
+      setErr(e2.code === 'AI_UNAVAILABLE'
+        ? 'AI 분석에 실패했어요. 직접 입력해 주세요.'
+        : (e2.message || '이미지 분석에 실패했어요.'));
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <input ref={inputRef} type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
+      <button onClick={() => inputRef.current?.click()} disabled={state === 'analyzing'}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '14px 16px',
+          borderRadius: 16, border: 'none', cursor: state === 'analyzing' ? 'default' : 'pointer',
+          textAlign: 'left', background: 'var(--fill-tertiary)' }}>
+        <span style={{ width: 40, height: 40, borderRadius: 12, background: 'var(--tint)',
+          display: 'grid', placeItems: 'center', flex: 'none' }}>
+          <Icon name={state === 'analyzing' ? 'Sparkles' : 'Camera'} size={20} color="#fff"
+            style={state === 'analyzing' ? { animation: 'spin 1.2s linear infinite' } : undefined} /></span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--label-primary)' }}>
+            {state === 'analyzing' ? '이미지 분석 중…' : '사진으로 입력'}</div>
+          <div style={{ fontSize: 13, color: 'var(--label-secondary)' }}>
+            워치·러닝앱 캡처를 올리면 거리·시간·심박을 자동 인식</div>
+        </div>
+        {state !== 'analyzing' && <Icon name="ChevronRight" size={18} color="var(--label-tertiary)" />}
+      </button>
+      {state === 'error' && <div style={{ marginTop: 8 }}><Banner tone="error">{err}</Banner></div>}
     </div>
   );
 }
@@ -85,19 +187,28 @@ function previewFromStream(raw) {
   return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 }
 
-export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
+export default function RecordSheet({ session, logDate, existingLog, onClose }) {
   const w = wmeta(session?.kind || 'easy');
-  const [form, setForm] = useState({ distance: '', minutes: '', seconds: '', pace: '', avgHr: '', maxHr: '', cadence: '', feel: 3, note: '' });
-  const [noRun, setNoRun] = useState(false);   // 오늘 달리지 않았어요 — 수치 입력 숨김
-  const [pain, setPain] = useState([]);          // 선택된 부위
-  const [painLevels, setPainLevels] = useState({});
-  const [detailOpen, setDetailOpen] = useState(false);
+  const dateLabel = fmtDateLabel(logDate);
+  const isToday = logDate === localISO();
+  // 선택된 일자에 이미 기록이 있으면 그 값으로 프리필(수정), 없으면 빈 폼(신규)
+  const initPain = existingLog?.pain_part
+    ? existingLog.pain_part.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const [form, setForm] = useState(() => formFromLog(existingLog));
+  // '달리지 않았어요' — 거리·시간이 없는 기존 기록(보강/휴식 등)은 이 모드로 복원
+  const [noRun, setNoRun] = useState(
+    () => !!existingLog && !existingLog.distance_km && !existingLog.duration_sec);
+  const [pain, setPain] = useState(initPain);          // 선택된 부위
+  const [painLevels, setPainLevels] = useState(
+    () => Object.fromEntries(initPain.map((p) => [p, existingLog?.pain_level || 3])));
+  const [detailOpen, setDetailOpen] = useState(
+    () => !!(existingLog?.avg_hr || existingLog?.max_hr || existingLog?.cadence || initPain.length));
   const [phase, setPhase] = useState('form');    // form | saving | review
   const [error, setError] = useState(null);
   const [logId, setLogId] = useState(null);
   const [streamText, setStreamText] = useState('');
   const [review, setReview] = useState(null);
-  const [source, setSource] = useState('manual');
+  const [source, setSource] = useState(existingLog?.source || 'manual');
   const [externalId, setExternalId] = useState(null);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -117,6 +228,23 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
     setDetailOpen(true);
   };
 
+  // 이미지 분석 결과로 폼 채움 — 인식 안 된 값(null)은 기존 입력 유지
+  const fillFromExtract = (d) => {
+    const hasDur = d.duration_sec != null;
+    setForm((p) => ({ ...p,
+      distance: d.distance_km != null ? String(d.distance_km) : p.distance,
+      minutes: hasDur ? String(Math.floor(d.duration_sec / 60)) : p.minutes,
+      seconds: hasDur ? String(d.duration_sec % 60) : p.seconds,
+      pace: d.avg_pace || p.pace,
+      avgHr: d.avg_hr != null ? String(d.avg_hr) : p.avgHr,
+      maxHr: d.max_hr != null ? String(d.max_hr) : p.maxHr,
+      cadence: d.cadence != null ? String(d.cadence) : p.cadence,
+    }));
+    setSource('image');
+    setExternalId(null);
+    setDetailOpen(true);
+  };
+
   const maxPain = Math.max(0, ...pain.map((p) => painLevels[p] || 3));
 
   const save = async () => {
@@ -124,7 +252,7 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
     setPhase('saving');
     try {
       const body = {
-        log_date: todayDate,
+        log_date: logDate,
         kind: session?.kind || 'easy',
         distance_km: noRun ? 0 : (parseFloat(form.distance) || 0),
         duration_sec: noRun ? null : parseTimeToSec(form.minutes, form.seconds),
@@ -137,7 +265,7 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
         pain_part: pain.join(', ') || null,
         pain_level: maxPain,
         user_comment: noRun && form.note
-          ? `(달리기 기록 없음 — 직접 기록) ${form.note}` : (form.note || null),
+          ? `${NORUN_PREFIX}${form.note}` : (form.note || null),
         source, external_id: externalId,
       };
       const res = await api.saveLog(body);
@@ -167,7 +295,9 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
   return (
     <Modal
       title={phase === 'review' ? 'AI 코치 분석' : phase === 'saving' ? '저장 중…' : '훈련 기록'}
-      subtitle={session?.title || '오늘 훈련'}
+      subtitle={isToday
+        ? (session?.title || '오늘 훈련')
+        : `${dateLabel}${session?.title ? ` · ${session.title}` : ''}`}
       locked={phase === 'saving'}
       onClose={() => onClose(phase === 'review')}>
 
@@ -197,7 +327,8 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
               <div style={{ display: 'flex', gap: 10 }}>
                 <Icon name="CircleCheck" size={17} color={w.color} style={{ flex: 'none', marginTop: 2 }} />
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label-secondary)', marginBottom: 3 }}>오늘 훈련 요약</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label-secondary)', marginBottom: 3 }}>
+                    {isToday ? '오늘 훈련 요약' : `${dateLabel} 훈련 요약`}</div>
                   <div style={{ fontSize: 14.5, lineHeight: 1.5, color: 'var(--label-primary)' }}>{review.summary}</div>
                 </div>
               </div>
@@ -245,6 +376,11 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
       {phase === 'form' && (
         <div style={{ padding: '16px 20px 24px' }}>
           {!noRun && <StravaImport onPick={pickActivity} />}
+          {!noRun && <ImageImport onExtract={fillFromExtract} />}
+          {!noRun && source === 'image' && (
+            <div style={{ marginTop: 8 }}>
+              <Banner tone="info">이미지에서 값을 채웠어요. 숫자를 확인하고 저장하세요.</Banner></div>
+          )}
 
           {/* 달리기 기록이 없는 날 — 수치 입력 없이 소감 기반으로 기록 */}
           <button onClick={() => setNoRun(!noRun)}
@@ -256,7 +392,8 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
               {noRun && <Icon name="Check" size={14} color="#fff" strokeWidth={3} />}
             </span>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--label-primary)' }}>오늘 달리지 않았어요</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--label-primary)' }}>
+                {isToday ? '오늘 달리지 않았어요' : '이 날 달리지 않았어요'}</div>
               <div style={{ fontSize: 13, color: 'var(--label-secondary)' }}>거리·시간 없이, 아래에 한 일을 적어 기록해요</div>
             </div>
           </button>
@@ -274,7 +411,7 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
             </>
           )}
 
-          <FieldLabel>오늘 몸 상태</FieldLabel>
+          <FieldLabel>{isToday ? '오늘 몸 상태' : '몸 상태'}</FieldLabel>
           <div style={{ display: 'flex', gap: 10 }}>
             {FEEL_OPTIONS.map((f) => (
               <button key={f.v} onClick={() => set('feel', f.v)}
@@ -338,7 +475,7 @@ export default function RecordSheet({ session, todayDate, onSaved, onClose }) {
             </div>
           )}
 
-          <FieldLabel>오늘 한 훈련 · 소감 {noRun ? '' : '(선택)'}</FieldLabel>
+          <FieldLabel>{isToday ? '오늘 한 훈련 · 소감' : '한 훈련 · 소감'} {noRun ? '' : '(선택)'}</FieldLabel>
           <div style={{ background: 'var(--fill-tertiary)', borderRadius: 12, padding: '12px 14px' }}>
             <textarea value={form.note} onChange={(e) => set('note', e.target.value)}
               placeholder={'한 일을 자유롭게 적어주세요 — 코치가 요약·분석에 반영해요.\n예: 폼 드릴 15분, 푸쉬업 30×2, 철봉 20×3. 발목 괜찮았음'}

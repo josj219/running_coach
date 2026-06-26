@@ -1,6 +1,7 @@
 // 오늘 탭 — 상태머신: NO_PLAN / PRE_WORKOUT / POST_WORKOUT / REVIEWED / REST_DAY / WEEK_END
-import React, { useState } from 'react';
-import { api } from '../api.js';
+import React, { useEffect, useState } from 'react';
+import { api, genResult } from '../api.js';
+import { pendingGen, pollUntil, reconcileOnce } from '../recover.js';
 import { sessionSubtitle, wmeta } from '../workouts.js';
 import {
   Banner, Card, CTA, Expander, Hero, Icon, MetricRow, NavBarLarge,
@@ -30,15 +31,32 @@ function TomorrowCard({ tomorrow }) {
 }
 
 // 당일 AI 카드 (워밍업/메인/쿨다운) 또는 생성 CTA
-function DailyCard({ data, session, onGenerated }) {
+function DailyCard({ data, session, planDate, recoverTick = 0, onGenerated }) {
   const w = wmeta(session.kind);
-  const [busy, setBusy] = useState(false);
+  // 생성 중 탭을 떠났다 돌아오면 카드가 새로 마운트된다 — 진행 중 의도가 남아 있으면 스피너부터 보여준다.
+  const [busy, setBusy] = useState(() => {
+    const p = pendingGen.get();
+    return !!(p && p.type === 'daily' && p.date === planDate);
+  });
   const [condition, setCondition] = useState('');
   const [error, setError] = useState(null);
   const [openDetail, setOpenDetail] = useState(false);
+  const [manual, setManual] = useState(false);
+
+  // App 복구 핸들러가 한 바퀴 돌고 나서(recoverTick 증가) 의도가 사라졌는데도 결과가 없으면
+  // 이 마운트는 끊긴 생성을 들고 있던 것 → 스피너를 풀고 다시 시도하게 둔다.
+  useEffect(() => {
+    if (recoverTick && busy && !data) {
+      const p = pendingGen.get();
+      if (!(p && p.type === 'daily' && p.date === planDate)) setBusy(false);
+    }
+  }, [recoverTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) {
     const chips = ['컨디션 좋아요', '조금 피곤해요', '수면 부족', '약간 통증 있어요'];
+    const chipStyle = (active) => ({ padding: '7px 13px', borderRadius: 999, border: 'none', cursor: 'pointer',
+      fontSize: 14, fontWeight: 600, background: active ? 'var(--tint)' : 'var(--fill-tertiary)',
+      color: active ? '#fff' : 'var(--label-secondary)' });
     return (
       <Card pad={16}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -47,19 +65,42 @@ function DailyCard({ data, session, onGenerated }) {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           {chips.map((c) => (
-            <button key={c} onClick={() => setCondition(c)}
-              style={{ padding: '7px 13px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 14,
-                fontWeight: 600, background: condition === c ? 'var(--tint)' : 'var(--fill-tertiary)',
-                color: condition === c ? '#fff' : 'var(--label-secondary)' }}>{c}</button>
+            <button key={c} onClick={() => { setManual(false); setCondition(c); }}
+              style={chipStyle(!manual && condition === c)}>{c}</button>
           ))}
+          <button onClick={() => { setManual(true); setCondition(''); }}
+            style={{ ...chipStyle(manual), display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Icon name="Pencil" size={13} color={manual ? '#fff' : 'var(--label-secondary)'} strokeWidth={2.4} />
+            직접 기입하기
+          </button>
         </div>
+        {manual && (
+          <div className="anim-in" style={{ background: 'var(--fill-tertiary)', borderRadius: 12,
+            padding: '11px 13px', marginBottom: 12 }}>
+            <textarea value={condition} onChange={(e) => setCondition(e.target.value)} autoFocus
+              placeholder={'오늘 몸 상태를 자유롭게 적어주세요 — 코치가 강도·구성에 반영해요.\n예: 어제 무리해서 왼쪽 무릎이 약간 시큰해요. 강도 조금 낮추고 싶어요.'}
+              rows={3} style={{ border: 'none', outline: 'none', background: 'none', width: '100%', resize: 'none',
+                fontSize: 15, color: 'var(--label-primary)', lineHeight: 1.5, fontFamily: 'inherit' }} />
+          </div>
+        )}
         {error && <div style={{ marginBottom: 10 }}><Banner tone="error">{error}</Banner></div>}
         <CTA variant="tinted" icon="Sparkles" busy={busy} onClick={async () => {
           setBusy(true); setError(null);
-          try { await api.generateDaily({ condition_note: condition }); onGenerated(); }
-          catch (e) { setError(e.message); }
-          finally { setBusy(false); }
-        }}>워밍업·메인·쿨다운 카드 만들기</CTA>
+          pendingGen.set({ type: 'daily', date: planDate });  // 끊겨도 재진입 시 복구
+          try {
+            await api.generateDaily({ condition_note: condition });
+            pendingGen.clear(); onGenerated();
+          } catch (e) {
+            if (e.code === 'NETWORK') {
+              // 연결만 끊겼다 — 서버는 끝냈을 수 있으니 결과를 폴링해 복구.
+              const r = await reconcileOnce(() => pollUntil(() => genResult({ type: 'daily', date: planDate })));
+              if (r === 'found') { pendingGen.clear(); onGenerated(); return; }
+              if (r === 'busy') { setBusy(false); return; }  // App 복구 핸들러가 결과 처리
+            }
+            pendingGen.clear();
+            setError(e.message); setBusy(false);
+          }
+        }}>오늘의 훈련 만들기</CTA>
       </Card>
     );
   }
@@ -115,7 +156,7 @@ function DailyCard({ data, session, onGenerated }) {
   );
 }
 
-export default function Today({ data, loading, error, refresh, onRecord, goWeek, onPlan }) {
+export default function Today({ data, loading, error, refresh, onRecord, goWeek, onPlan, recoverTick = 0 }) {
   if (loading) return <div><NavBarLarge title="오늘" /><Spinner label="불러오는 중…" /></div>;
   if (error) return (
     <div><NavBarLarge title="오늘" />
@@ -263,7 +304,8 @@ export default function Today({ data, loading, error, refresh, onRecord, goWeek,
           </div>
         </Hero>
 
-        <DailyCard data={daily} session={session} onGenerated={refresh} />
+        <DailyCard data={daily} session={session} planDate={data.today}
+          recoverTick={recoverTick} onGenerated={refresh} />
 
         {(session.focus || session.note) && (
           <Expander title="이 세션의 목적" icon="Target" iconColor={w.color}>

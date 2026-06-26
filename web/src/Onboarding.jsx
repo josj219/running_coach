@@ -73,7 +73,9 @@ function TimeInput({ label, value, onChange }) {
   );
 }
 
-const EMPTY_SLOT = { days: [], title: '', duration_min: '', place: '야외' };
+const EMPTY_SLOT = { days: [], title: '', duration_min: '', place: '야외', note: '' };
+// 보유 기구를 적어두면 코치가 그에 맞춰 훈련을 제안한다 (예: 무동력 트레드밀 인터벌).
+const GEAR_PLACES = ['실내 헬스장'];
 const CURRENT_YEAR = new Date().getFullYear();
 
 export default function Onboarding({ user, onDone }) {
@@ -113,6 +115,7 @@ export default function Onboarding({ user, onDone }) {
         slots: slots.map((s) => ({
           days: s.days, title: s.title.trim(),
           duration_min: s.duration_min ? parseInt(s.duration_min, 10) : null, place: s.place,
+          note: s.note?.trim() || null,
         })),
       });
       onDone(me);
@@ -166,9 +169,12 @@ export default function Onboarding({ user, onDone }) {
           <SectionLabel>훈련 가능 시간 (선택)</SectionLabel>
           <Card pad={16} style={{ marginBottom: 16 }}>
             {slots.map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tint)' }}>{s.days.map((d) => WEEK_DAYS[d]).join('·')}</span>
-                <span style={{ flex: 1, fontSize: 14.5 }}>{s.title}{s.duration_min ? ` · ${s.duration_min}분` : ''}{s.place ? ` · ${s.place}` : ''}</span>
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tint)', paddingTop: 1 }}>{s.days.map((d) => WEEK_DAYS[d]).join('·')}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14.5 }}>{s.title}{s.duration_min ? ` · ${s.duration_min}분` : ''}{s.place ? ` · ${s.place}` : ''}</div>
+                  {s.note?.trim() && <div style={{ fontSize: 12.5, color: 'var(--label-tertiary)', marginTop: 2 }}>🏋️ {s.note.trim()}</div>}
+                </div>
                 <button onClick={() => setSlots(slots.filter((_, idx) => idx !== i))} aria-label="삭제"
                   style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 4 }}>
                   <Icon name="Trash2" size={15} color="var(--accent-red)" /></button>

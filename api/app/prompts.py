@@ -188,6 +188,35 @@ PLAN_ADJUSTMENT_PROMPT = COACHING_PHILOSOPHY + """
 - changes에는 실제로 바뀌는 세션만 넣는다. 변경 불필요하면 빈 배열.
 """ + COMMON_TAIL
 
+WORKOUT_IMAGE_EXTRACT_PROMPT = """# 역할: 운동 기록 스크린샷에서 수치 추출
+
+사용자가 올린 이미지(Garmin Connect·Strava·Apple 피트니스·Nike Run Club·삼성헬스·
+트레드밀 콘솔 등 러닝 기록 화면 캡처)를 읽고, 표시된 수치를 정확히 추출한다.
+
+## 규칙
+- 화면에 보이는 값만 추출한다. 보이지 않거나 확신이 없으면 해당 필드는 null.
+- 단위 변환: 거리가 마일(mi)이면 km로(1mi=1.609km), 고도가 피트(ft)면 m로 환산한다.
+- avg_pace는 "M:SS" 형식의 km당 페이스. min/mi로 표시돼 있으면 min/km로 환산한다.
+- duration_sec는 총 소요시간을 초로 환산한다 (예: 31:00 → 1860).
+- cadence는 분당 걸음 수(spm) 정수. avg_hr·max_hr는 정수.
+- 러닝/운동 기록 화면이 아니면 found:false 로 응답하고 수치는 모두 null.
+
+## 출력 형식 — 아래 JSON 하나만 출력한다. 코드펜스 ```json ... ``` 사용.
+```json
+{
+  "found": true,
+  "distance_km": 5.2,
+  "duration_sec": 1860,
+  "avg_pace": "6:00",
+  "avg_hr": 145,
+  "max_hr": 162,
+  "cadence": 172,
+  "elevation_m": 30,
+  "note": "어떤 화면에서 무엇을 읽었는지 한 줄 요약 (한국어)"
+}
+```
+"""
+
 WEEKLY_EVALUATION_PROMPT = COACHING_PHILOSOPHY + """
 
 # 역할: 주간 성장 리포트

@@ -1,7 +1,7 @@
 // 공용 UI — design/project/app/ui.jsx 이식 (iOS 26 + 스포티 레이어)
 import React, { useEffect, useState } from 'react';
 import {
-  Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Check,
+  Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Camera, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
   CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
   LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
@@ -10,7 +10,7 @@ import {
 import { WEEK_DAYS, wmeta } from '../workouts.js';
 
 const ICONS = {
-  Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Check,
+  Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Camera, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
   CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
   LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,

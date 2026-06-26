@@ -45,6 +45,12 @@ class LogIn(BaseModel):
     external_id: str | None = None
 
 
+class ImageAnalyzeIn(BaseModel):
+    # data: URL 접두사 없는 순수 base64. 클라이언트가 캔버스로 축소 후 전송.
+    image_b64: str = Field(..., min_length=1)
+    media_type: str = "image/jpeg"
+
+
 def _review_dict(r: WorkoutReview | None) -> dict | None:
     if r is None:
         return None
@@ -103,6 +109,22 @@ async def create_log(body: LogIn, user: User = Depends(get_current_user),
     await db.refresh(log)
     return {"id": log.id, "session_id": log.session_id, "session_status": session_status,
             "created": existing is None}
+
+
+@router.post("/analyze-image")
+async def analyze_image(body: ImageAnalyzeIn, user: User = Depends(get_current_user)):
+    """운동 기록 스크린샷을 Claude 비전으로 분석해 거리·시간·페이스·심박 등 수치를 추출.
+
+    DB에 저장하지 않는다 — 추출 결과만 돌려주고, 사용자가 폼에서 확인 후 저장한다.
+    """
+    # base64 길이(문자) ≈ 원본 바이트 × 4/3. ~8MB 원본 상한.
+    if len(body.image_b64) > 11_000_000:
+        raise HTTPException(413, {"code": "IMAGE_TOO_LARGE", "message": "이미지가 너무 큽니다. 더 작게 캡처해 주세요."})
+    try:
+        data = await coach.extract_workout_image(body.image_b64, body.media_type)
+    except coach.CoachError as e:
+        raise HTTPException(503, {"code": "AI_UNAVAILABLE", "message": str(e)})
+    return data
 
 
 async def _build_review_message(db: AsyncSession, log: WorkoutLog, user_id: int) -> str:

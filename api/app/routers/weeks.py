@@ -32,10 +32,30 @@ def _parse_iso(iso_week: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2))
 
 
+def _log_summary(l: WorkoutLog) -> dict:
+    """주간 탭에서 일자별 기록 표시 + 기록 수정 프리필에 쓰는 컴팩트 요약."""
+    return {
+        "id": l.id, "distance_km": l.distance_km, "duration_sec": l.duration_sec,
+        "avg_pace": l.avg_pace, "avg_hr": l.avg_hr, "max_hr": l.max_hr,
+        "cadence": l.cadence, "feel": l.feel, "pain_part": l.pain_part,
+        "pain_level": l.pain_level, "user_comment": l.user_comment, "source": l.source,
+    }
+
+
 async def _plan_payload(db: AsyncSession, plan: WeeklyPlan, user_id: int) -> dict:
     res = await db.execute(select(PlanSession).where(PlanSession.plan_id == plan.id)
                            .order_by(PlanSession.session_date))
     sessions = [_session_dict(s) for s in res.scalars()]
+    # 그 주의 실제 기록을 일자별로 각 세션에 첨부 — 과거 일자 기록 표시/수정 진입점
+    logs_res = await db.execute(select(WorkoutLog).where(
+        WorkoutLog.user_id == user_id,
+        WorkoutLog.log_date >= plan.week_start,
+        WorkoutLog.log_date <= plan.week_start + timedelta(days=6),
+    ))
+    logs_by_date = {l.log_date.isoformat(): l for l in logs_res.scalars()}
+    for s in sessions:
+        log = logs_by_date.get(s["session_date"])
+        s["log"] = _log_summary(log) if log else None
     progress = await week_progress(db, plan, date.today(), user_id)
     ev = (await db.execute(select(WeeklyEvaluation).where(
         WeeklyEvaluation.plan_id == plan.id,

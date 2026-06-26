@@ -81,9 +81,12 @@ async def get_today(user: User = Depends(get_current_user), db: AsyncSession = D
         "tomorrow": _session_dict(tomorrow_session),
         "log_id": log.id if log else None,
         "log": None if log is None else {
+            "id": log.id,
             "distance_km": log.distance_km, "duration_sec": log.duration_sec,
-            "avg_pace": log.avg_pace, "avg_hr": log.avg_hr, "cadence": log.cadence,
-            "feel": log.feel,
+            "avg_pace": log.avg_pace, "avg_hr": log.avg_hr, "max_hr": log.max_hr,
+            "cadence": log.cadence, "feel": log.feel,
+            "pain_part": log.pain_part, "pain_level": log.pain_level,
+            "user_comment": log.user_comment, "source": log.source,
             "review": None if not log.review else {
                 "recovery": log.review.recovery, "coach_comment": log.review.coach_comment,
                 "summary": log.review.summary,

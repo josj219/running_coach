@@ -42,6 +42,11 @@ MOCK_RESPONSES = {
         "cautions": ["통증 발생 시 즉시 중단"],
     },
     "adjust": {"reason": "컨디션 저하 반영", "changes": [], "kept": []},
+    "extract": {
+        "found": True, "distance_km": 5.2, "duration_sec": 1860, "avg_pace": "5:58",
+        "avg_hr": 145, "max_hr": 162, "cadence": 172, "elevation_m": 30,
+        "note": "(mock) 스크린샷에서 거리·시간·페이스·심박을 읽었다.",
+    },
     "evaluation": {
         "coach_message": "📈 복귀 첫 주 치고 심박 안정성이 좋다. 다음 주는 주 3회 조깅으로 빈도를 올리자.",
         "detail_md": "### 목표 진척도\n| 항목 | 현재 |\n|---|---|\n| 남은 기간 | 21주 |\n| 준비도 | 중 |",
@@ -136,6 +141,16 @@ async def generate(kind: str, system_prompt: str, user_message: str,
         raise CoachError(f"Claude API 호출 실패: {e}") from e
     text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
     return parse_json_block(text)
+
+
+async def extract_workout_image(image_b64: str, media_type: str = "image/jpeg") -> dict:
+    """운동 기록 스크린샷에서 거리·시간·페이스·심박 등 수치를 추출해 dict로 반환."""
+    from ..prompts import WORKOUT_IMAGE_EXTRACT_PROMPT
+    return await generate(
+        "extract", WORKOUT_IMAGE_EXTRACT_PROMPT,
+        "이 운동 기록 스크린샷에서 수치를 추출해줘.",
+        image_b64=image_b64, image_media_type=media_type,
+    )
 
 
 async def stream_text(system_prompt: str, user_message: str) -> AsyncIterator[str]:
