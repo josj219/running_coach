@@ -43,3 +43,11 @@ async def client():
     headers = {"Authorization": f"Bearer {_token}"}
     async with httpx.AsyncClient(transport=transport, base_url="http://test", headers=headers) as c:
         yield c
+
+
+@pytest.fixture
+async def db_session():
+    """Async session fixture for database tests."""
+    await init_db()
+    async with SessionLocal() as s:
+        yield s

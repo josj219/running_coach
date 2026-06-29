@@ -233,6 +233,7 @@ class Integration(Base):
     athlete_name: Mapped[str | None] = mapped_column(String)
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auth_blob: Mapped[str | None] = mapped_column(Text)  # Garmin 토큰 블롭(base64)
 
 
 class ExternalActivity(Base):
@@ -268,6 +269,7 @@ _ADDED_COLUMNS = [
     ("users", "password_hash", "TEXT"),
     ("users", "onboarded", "BOOLEAN DEFAULT FALSE"),
     ("daily_plans", "session_updated", "BOOLEAN DEFAULT FALSE"),
+    ("integrations", "auth_blob", "TEXT"),
 ]
 
 
