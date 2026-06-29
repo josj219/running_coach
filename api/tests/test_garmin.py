@@ -63,30 +63,32 @@ async def test_sync_activities_upserts_running_only(db_session, monkeypatch):
     ]
     monkeypatch.setattr(garmin, "fetch_recent", lambda blob, limit=10: (fake, "newblob"))
 
-    integ = Integration(user_id=1, provider="garmin", auth_blob="oldblob")
+    integ = Integration(user_id=900001, provider="garmin", auth_blob="oldblob")
     db_session.add(integ)
     await db_session.commit()
 
-    added = await garmin.sync_activities(db_session, integ, user_id=1)
+    added = await garmin.sync_activities(db_session, integ, user_id=900001)
     assert added == 1                      # 러닝만
     assert integ.auth_blob == "newblob"    # 갱신된 토큰 저장
     assert integ.last_sync_at is not None
 
     rows = (await db_session.execute(select(ExternalActivity).where(
-        ExternalActivity.provider == "garmin"))).scalars().all()
+        ExternalActivity.provider == "garmin",
+        ExternalActivity.user_id == 900001,
+    ))).scalars().all()
     assert len(rows) == 1
     assert rows[0].cadence == 176
 
     # 재동기화 시 중복 추가 안 함
-    added2 = await garmin.sync_activities(db_session, integ, user_id=1)
+    added2 = await garmin.sync_activities(db_session, integ, user_id=900001)
     assert added2 == 0
 
 
 @pytest.mark.asyncio
 async def test_sync_requires_auth_blob(db_session):
-    integ = Integration(user_id=1, provider="garmin", auth_blob=None)
+    integ = Integration(user_id=900001, provider="garmin", auth_blob=None)
     with pytest.raises(garmin.GarminError):
-        await garmin.sync_activities(db_session, integ, user_id=1)
+        await garmin.sync_activities(db_session, integ, user_id=900001)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -162,3 +164,36 @@ def test_begin_login_failure_raises_garmin_error(monkeypatch):
     monkeypatch.setattr(garmin, "Garmin", boom)
     with pytest.raises(garmin.GarminError):
         garmin.begin_login("a@b.com", "wrong")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Task 5: 라우터 테스트 — 순서 중요 (sync 404 먼저, 그 다음 connect)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_garmin_sync_requires_connection(client):
+    r = await client.post("/api/integrations/garmin/sync")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_garmin_connect_ok(client, monkeypatch):
+    monkeypatch.setattr(garmin, "begin_login",
+                        lambda email, password: {"status": "ok", "blob": "B", "athlete_name": "고고조"})
+    r = await client.post("/api/integrations/garmin/connect",
+                          json={"email": "a@b.com", "password": "pw"})
+    assert r.status_code == 200
+    assert r.json()["connected"] is True
+    status = (await client.get("/api/integrations")).json()
+    assert status["garmin"]["connected"] is True
+    # cleanup — disconnect so subsequent tests (test_23 등) start with no garmin connection
+    await client.delete("/api/integrations/garmin")
+
+
+@pytest.mark.asyncio
+async def test_garmin_connect_mfa(client, monkeypatch):
+    monkeypatch.setattr(garmin, "begin_login",
+                        lambda email, password: {"status": "mfa", "mfa_token": "T"})
+    r = await client.post("/api/integrations/garmin/connect",
+                          json={"email": "a@b.com", "password": "pw"})
+    assert r.json()["mfa_required"] is True

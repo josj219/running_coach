@@ -6,6 +6,8 @@
   연결하는 것. 본 라우터는 Garmin 직접 연동 자리(어댑터)와 안내를 제공한다.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -15,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import _decode_user_id, create_token, get_current_user
 from ..config import get_settings
 from ..db import ExternalActivity, Integration, User, get_db
-from ..services import strava
+from ..services import garmin, strava
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
@@ -39,11 +41,11 @@ async def list_integrations(user: User = Depends(get_current_user), db: AsyncSes
             "last_sync_at": st.last_sync_at.isoformat() if st and st.last_sync_at else None,
         },
         "garmin": {
-            "available": False,
-            "connected": ga is not None,
-            "note": "Garmin Health API는 파트너 승인이 필요합니다. "
-                    "Garmin Connect 앱에서 Strava 자동 업로드를 켜면 "
-                    "Strava 연동만으로 가민 기록이 자동으로 들어옵니다.",
+            "available": True,
+            "connected": ga is not None and ga.auth_blob is not None,
+            "athlete_name": ga.athlete_name if ga else None,
+            "last_sync_at": ga.last_sync_at.isoformat() if ga and ga.last_sync_at else None,
+            "note": "가민 커넥트 이메일/비밀번호로 직접 연결합니다. 비밀번호는 저장하지 않아요.",
         },
     }
 
@@ -135,6 +137,85 @@ class DisconnectBody(BaseModel):
 @router.delete("/strava")
 async def strava_disconnect(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     integ = await _get_integration(db, "strava", user.id)
+    if integ:
+        await db.delete(integ)
+        await db.commit()
+    return {"disconnected": True}
+
+
+class GarminConnectBody(BaseModel):
+    email: str
+    password: str
+
+
+class GarminMfaBody(BaseModel):
+    mfa_token: str
+    code: str
+
+
+async def _store_garmin(db: AsyncSession, user_id: int, res: dict) -> None:
+    integ = await _get_integration(db, "garmin", user_id) \
+        or Integration(user_id=user_id, provider="garmin")
+    integ.auth_blob = res["blob"]
+    integ.athlete_name = res.get("athlete_name")
+    db.add(integ)
+    await db.commit()
+
+
+@router.post("/garmin/connect")
+async def garmin_connect(body: GarminConnectBody, user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    try:
+        res = await asyncio.to_thread(garmin.begin_login, body.email, body.password)
+    except garmin.GarminError as e:
+        raise HTTPException(401, {"code": "GARMIN_AUTH", "message": str(e)})
+    if res["status"] == "mfa":
+        return {"mfa_required": True, "mfa_token": res["mfa_token"]}
+    await _store_garmin(db, user.id, res)
+    return {"connected": True, "athlete_name": res.get("athlete_name")}
+
+
+@router.post("/garmin/mfa")
+async def garmin_mfa(body: GarminMfaBody, user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    try:
+        res = await asyncio.to_thread(garmin.complete_mfa, body.mfa_token, body.code)
+    except garmin.GarminError as e:
+        raise HTTPException(401, {"code": "GARMIN_MFA", "message": str(e)})
+    await _store_garmin(db, user.id, res)
+    return {"connected": True, "athlete_name": res.get("athlete_name")}
+
+
+@router.post("/garmin/sync")
+async def garmin_sync(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    integ = await _get_integration(db, "garmin", user.id)
+    if integ is None or not integ.auth_blob:
+        raise HTTPException(404, {"code": "NOT_CONNECTED", "message": "가민이 연결되어 있지 않습니다."})
+    try:
+        added = await garmin.sync_activities(db, integ, user.id)
+    except garmin.GarminError as e:
+        raise HTTPException(502, {"code": "INTEGRATION_ERROR", "message": str(e)})
+    return {"added": added}
+
+
+@router.get("/garmin/activities")
+async def garmin_activities(limit: int = 5, user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    integ = await _get_integration(db, "garmin", user.id)
+    if integ and integ.auth_blob:
+        try:
+            await garmin.sync_activities(db, integ, user.id)
+        except garmin.GarminError:
+            pass  # 캐시로 응답
+    res = await db.execute(select(ExternalActivity).where(
+        ExternalActivity.user_id == user.id, ExternalActivity.provider == "garmin",
+    ).order_by(ExternalActivity.start_date.desc()).limit(limit))
+    return {"items": [_activity_dict(a) for a in res.scalars()]}
+
+
+@router.delete("/garmin")
+async def garmin_disconnect(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    integ = await _get_integration(db, "garmin", user.id)
     if integ:
         await db.delete(integ)
         await db.commit()

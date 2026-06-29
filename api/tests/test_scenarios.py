@@ -314,9 +314,10 @@ async def test_22_profile_patch(client):
 
 async def test_23_integrations_status(client):
     body = (await client.get("/api/integrations")).json()
-    assert body["strava"]["available"] is False  # 키 미설정
+    assert body["strava"]["available"] is False   # 키 미설정
     assert body["strava"]["connected"] is False
-    assert "Strava" in body["garmin"]["note"]
+    assert body["garmin"]["available"] is True     # 가민은 UI 로그인 — 항상 가능
+    assert body["garmin"]["connected"] is False
 
 
 async def test_24_strava_authorize_requires_keys(client):
