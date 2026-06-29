@@ -87,3 +87,61 @@ async def test_sync_requires_auth_blob(db_session):
     integ = Integration(user_id=1, provider="garmin", auth_blob=None)
     with pytest.raises(garmin.GarminError):
         await garmin.sync_activities(db_session, integ, user_id=1)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Task 4: begin_login / complete_mfa
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _FakeClient:
+    def __init__(self, *a, needs_mfa=False, **kw):
+        self._needs_mfa = needs_mfa
+        self.garth = self   # 호환성
+        self.client = self  # _dump_blob(c) 가 c.client.dumps() 를 호출하므로 필요
+
+    def login(self):
+        if self._needs_mfa:
+            return ("needs_mfa", {"state": "x"})
+        return ("ok", None)
+
+    def resume_login(self, state, code):
+        if code != "123456":
+            raise ValueError("bad code")
+        return ("ok", None)
+
+    def dumps(self):
+        return "BLOB"
+
+    def get_full_name(self):
+        return "고고조"
+
+
+def test_begin_login_ok(monkeypatch):
+    monkeypatch.setattr(garmin, "Garmin", lambda **kw: _FakeClient(**kw))
+    res = garmin.begin_login("a@b.com", "pw")
+    assert res["status"] == "ok"
+    assert res["blob"] == "BLOB"
+    assert res["athlete_name"] == "고고조"
+
+
+def test_begin_login_mfa_then_complete(monkeypatch):
+    monkeypatch.setattr(garmin, "Garmin", lambda **kw: _FakeClient(needs_mfa=True, **kw))
+    res = garmin.begin_login("a@b.com", "pw")
+    assert res["status"] == "mfa"
+    tok = res["mfa_token"]
+    ok = garmin.complete_mfa(tok, "123456")
+    assert ok["status"] == "ok"
+    assert ok["blob"] == "BLOB"
+
+
+def test_complete_mfa_wrong_code(monkeypatch):
+    monkeypatch.setattr(garmin, "Garmin", lambda **kw: _FakeClient(needs_mfa=True, **kw))
+    tok = garmin.begin_login("a@b.com", "pw")["mfa_token"]
+    with pytest.raises(garmin.GarminError):
+        garmin.complete_mfa(tok, "000000")
+
+
+def test_complete_mfa_expired():
+    """존재하지 않는(또는 만료된) mfa_token → GarminError."""
+    with pytest.raises(garmin.GarminError):
+        garmin.complete_mfa("nonexistent-token", "123456")

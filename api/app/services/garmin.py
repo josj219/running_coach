@@ -5,8 +5,11 @@ Garmin은 개인에게 공식 OAuth를 제공하지 않아, 사용자 대신 로
 """
 
 import asyncio
+import secrets
+import time
 from datetime import datetime, timezone
 
+from garminconnect import Garmin  # 테스트에서 monkeypatch 가능하도록 모듈 레벨 import
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +17,10 @@ from ..db import ExternalActivity, Integration
 
 RUN_KEYS = {"running", "trail_running", "treadmill_running", "virtual_run",
             "track_running", "indoor_running", "ultra_run", "obstacle_run"}
+
+# MFA 진행 중인 세션 캐시: mfa_token -> (client, state, expires_at)
+_PENDING: dict[str, tuple] = {}
+_MFA_TTL = 300  # 5분
 
 
 class GarminError(Exception):
@@ -38,7 +45,6 @@ def _load_client(blob: str):
     garminconnect 0.3.6+: 토큰은 client.client (garminconnect.client.Client)에 저장된다.
     client.client.loads(blob) 으로 JSON 토큰 문자열을 복원한다.
     """
-    from garminconnect import Garmin
     c = Garmin()
     c.client.loads(blob)   # garminconnect.client.Client.loads() — JSON 토큰 복원
     return c
@@ -50,6 +56,70 @@ def _dump_blob(c) -> str:
     garminconnect 0.3.6+: client.client.dumps() 가 JSON 직렬화를 담당한다.
     """
     return c.client.dumps()   # garminconnect.client.Client.dumps()
+
+
+def _athlete_name(client) -> str | None:
+    """클라이언트에서 선수 이름 반환. 실패 시 None."""
+    try:
+        return client.get_full_name()
+    except Exception:
+        return None
+
+
+def _prune_pending() -> None:
+    """만료된 MFA 세션 제거."""
+    now = time.time()
+    for k in [k for k, (_, _, exp) in _PENDING.items() if exp < now]:
+        _PENDING.pop(k, None)
+
+
+def begin_login(email: str, password: str) -> dict:
+    """1단계 로그인. MFA 필요 시 중간 클라이언트를 메모리에 보관하고 토큰 반환.
+
+    Returns:
+        {"status": "ok", "blob": str, "athlete_name": str | None} — MFA 불필요
+        {"status": "mfa", "mfa_token": str} — MFA 필요
+
+    Raises:
+        GarminError: 로그인 실패 시
+    """
+    try:
+        client = Garmin(email=email, password=password, return_on_mfa=True)
+        res = client.login()
+    except Exception as e:
+        raise GarminError("가민 로그인 실패: 이메일/비밀번호를 확인해 주세요.") from e
+
+    # 실제 라이브러리: login() 반환값은 (mfa_status, legacy_token)
+    # MFA 필요: res[0] == "needs_mfa", res[1] == state dict
+    # 성공: res[0] is None (또는 "ok" — FakeClient 호환)
+    if isinstance(res, tuple) and res[0] == "needs_mfa":
+        _prune_pending()
+        tok = secrets.token_urlsafe(16)
+        _PENDING[tok] = (client, res[1], time.time() + _MFA_TTL)
+        return {"status": "mfa", "mfa_token": tok}
+
+    return {"status": "ok", "blob": _dump_blob(client), "athlete_name": _athlete_name(client)}
+
+
+def complete_mfa(mfa_token: str, code: str) -> dict:
+    """2단계: 보관된 클라이언트로 MFA 코드 제출.
+
+    Returns:
+        {"status": "ok", "blob": str, "athlete_name": str | None}
+
+    Raises:
+        GarminError: 토큰 만료 또는 코드 오류 시
+    """
+    _prune_pending()
+    entry = _PENDING.pop(mfa_token, None)
+    if not entry:
+        raise GarminError("MFA 세션이 만료됐어요. 다시 연결해 주세요.")
+    client, state, _ = entry
+    try:
+        client.resume_login(state, code)
+    except Exception as e:
+        raise GarminError("MFA 코드가 올바르지 않아요.") from e
+    return {"status": "ok", "blob": _dump_blob(client), "athlete_name": _athlete_name(client)}
 
 
 def fetch_recent(blob: str, limit: int = 10) -> tuple[list[dict], str]:
