@@ -69,6 +69,11 @@ export const api = {
   stravaAuthUrl: () => request('/api/integrations/strava/authorize-url'),
   stravaActivities: (limit = 5) => request(`/api/integrations/strava/activities?limit=${limit}`),
   stravaDisconnect: () => request('/api/integrations/strava', { method: 'DELETE' }),
+  garminConnect: (body) => request('/api/integrations/garmin/connect', { method: 'POST', body: JSON.stringify(body) }),
+  garminMfa: (body) => request('/api/integrations/garmin/mfa', { method: 'POST', body: JSON.stringify(body) }),
+  garminSync: () => request('/api/integrations/garmin/sync', { method: 'POST' }),
+  garminActivities: (limit = 5) => request(`/api/integrations/garmin/activities?limit=${limit}`),
+  garminDisconnect: () => request('/api/integrations/garmin', { method: 'DELETE' }),
 };
 
 // 끊긴 생성의 결과가 서버에 저장됐는지 확인 — 복구용. job: {type, date?}
