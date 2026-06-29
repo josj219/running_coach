@@ -74,13 +74,14 @@ async def sync_activities(db: AsyncSession, integ: Integration, user_id: int, li
     for a in acts:
         if not is_running(a):
             continue
-        m = map_activity(a)
+        ext_id = str(a["activityId"])
         existing = (await db.execute(select(ExternalActivity).where(
             ExternalActivity.provider == "garmin",
-            ExternalActivity.external_id == m["external_id"],
+            ExternalActivity.external_id == ext_id,
         ))).scalar_one_or_none()
         if existing:
             continue
+        m = map_activity(a)
         db.add(ExternalActivity(
             user_id=user_id, provider="garmin",
             raw={k: a.get(k) for k in ("activityId", "activityName", "activityType",

@@ -80,3 +80,10 @@ async def test_sync_activities_upserts_running_only(db_session, monkeypatch):
     # 재동기화 시 중복 추가 안 함
     added2 = await garmin.sync_activities(db_session, integ, user_id=1)
     assert added2 == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_requires_auth_blob(db_session):
+    integ = Integration(user_id=1, provider="garmin", auth_blob=None)
+    with pytest.raises(garmin.GarminError):
+        await garmin.sync_activities(db_session, integ, user_id=1)
