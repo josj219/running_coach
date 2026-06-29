@@ -210,13 +210,19 @@ function GarminCard({ garmin, onChanged }) {
       const r = await api.garminConnect({ email, password });
       setPassword('');
       if (r.mfa_required) { setMfaToken(r.mfa_token); setMode('mfa'); return; }
-      onChanged();
+      onChanged(); setMode('idle');
     } catch (e) { setError(e.message || '연결 실패'); setMode('form'); }
   };
   const submitMfa = async () => {
     setError(null); setMode('busy');
-    try { await api.garminMfa({ mfa_token: mfaToken, code }); setCode(''); onChanged(); }
+    try { await api.garminMfa({ mfa_token: mfaToken, code }); setCode(''); onChanged(); setMode('idle'); }
     catch (e) { setError(e.message || 'MFA 실패'); setMode('mfa'); }
+  };
+
+  const disconnect = async () => {
+    setError(null); setMode('busy');
+    try { await api.garminDisconnect(); onChanged(); setMode('idle'); }
+    catch (e) { setError(e.message || '해제 실패'); setMode('idle'); }
   };
 
   return (
@@ -228,7 +234,7 @@ function GarminCard({ garmin, onChanged }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ fontSize: 16, fontWeight: 600, flex: 1 }}>Garmin</div>
           {garmin?.connected ? (
-            <button onClick={async () => { await api.garminDisconnect(); onChanged(); }}
+            <button onClick={disconnect} disabled={mode === 'busy'}
               style={{ border: 'none', background: 'var(--fill-tertiary)', color: 'var(--accent-red)',
                 fontWeight: 600, fontSize: 13.5, borderRadius: 999, padding: '7px 13px', cursor: 'pointer' }}>해제</button>
           ) : mode === 'idle' ? (
@@ -251,7 +257,7 @@ function GarminCard({ garmin, onChanged }) {
               onChange={(e) => setPassword(e.target.value)} />
             {error && <div style={{ marginBottom: 8 }}><Banner tone="error">{error}</Banner></div>}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setMode('idle'); setError(null); }}
+              <button onClick={() => { setMode('idle'); setError(null); setEmail(''); }}
                 style={{ flex: 1, padding: '10px 0', borderRadius: 11, border: 'none', cursor: 'pointer',
                   background: 'var(--fill-tertiary)', color: 'var(--label-secondary)', fontWeight: 600 }}>취소</button>
               <button onClick={connect} disabled={!email || !password}
@@ -266,7 +272,7 @@ function GarminCard({ garmin, onChanged }) {
               onChange={(e) => setCode(e.target.value)} />
             {error && <div style={{ marginBottom: 8 }}><Banner tone="error">{error}</Banner></div>}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setMode('idle'); setCode(''); setError(null); }}
+              <button onClick={() => { setMode('idle'); setCode(''); setError(null); setMfaToken(''); }}
                 style={{ flex: 1, padding: '10px 0', borderRadius: 11, border: 'none', cursor: 'pointer',
                   background: 'var(--fill-tertiary)', color: 'var(--label-secondary)', fontWeight: 600 }}>취소</button>
               <button onClick={submitMfa} disabled={!code}
