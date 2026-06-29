@@ -95,6 +95,7 @@ def begin_login(email: str, password: str) -> dict:
     if isinstance(res, tuple) and res[0] == "needs_mfa":
         _prune_pending()
         tok = secrets.token_urlsafe(16)
+        # 라이브 client는 메모리에만(최대 TTL) 보관 — MFA 세션 유지에 필요. DB엔 토큰만 저장.
         _PENDING[tok] = (client, res[1], time.time() + _MFA_TTL)
         return {"status": "mfa", "mfa_token": tok}
 
@@ -111,14 +112,16 @@ def complete_mfa(mfa_token: str, code: str) -> dict:
         GarminError: 토큰 만료 또는 코드 오류 시
     """
     _prune_pending()
-    entry = _PENDING.pop(mfa_token, None)
+    entry = _PENDING.get(mfa_token)   # peek — keep session so a wrong code can be retried
     if not entry:
         raise GarminError("MFA 세션이 만료됐어요. 다시 연결해 주세요.")
     client, state, _ = entry
     try:
         client.resume_login(state, code)
     except Exception as e:
+        # 코드 오타 시 세션을 유지해 재입력을 허용(틀린 코드로는 토큰이 발급되지 않음).
         raise GarminError("MFA 코드가 올바르지 않아요.") from e
+    _PENDING.pop(mfa_token, None)   # 성공 시에만 세션 소비
     return {"status": "ok", "blob": _dump_blob(client), "athlete_name": _athlete_name(client)}
 
 

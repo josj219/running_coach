@@ -145,3 +145,20 @@ def test_complete_mfa_expired():
     """존재하지 않는(또는 만료된) mfa_token → GarminError."""
     with pytest.raises(garmin.GarminError):
         garmin.complete_mfa("nonexistent-token", "123456")
+
+
+def test_complete_mfa_wrong_then_right(monkeypatch):
+    monkeypatch.setattr(garmin, "Garmin", lambda **kw: _FakeClient(needs_mfa=True, **kw))
+    tok = garmin.begin_login("a@b.com", "pw")["mfa_token"]
+    with pytest.raises(garmin.GarminError):
+        garmin.complete_mfa(tok, "000000")     # 오타 — 세션 유지돼야
+    ok = garmin.complete_mfa(tok, "123456")    # 정답 재입력 성공
+    assert ok["status"] == "ok"
+
+
+def test_begin_login_failure_raises_garmin_error(monkeypatch):
+    def boom(**kw):
+        raise RuntimeError("bad creds")
+    monkeypatch.setattr(garmin, "Garmin", boom)
+    with pytest.raises(garmin.GarminError):
+        garmin.begin_login("a@b.com", "wrong")
