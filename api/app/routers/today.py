@@ -95,6 +95,7 @@ async def get_today(user: User = Depends(get_current_user), db: AsyncSession = D
         },
         "daily_plan": None if daily is None else {
             "sections": daily.sections, "is_adjusted": daily.is_adjusted,
+            "session_updated": daily.session_updated,
             "adjust_reason": daily.adjust_reason, "status": daily.status,
         },
         "week_progress": progress,

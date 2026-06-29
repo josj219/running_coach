@@ -62,6 +62,25 @@ async def generate_daily_plan(body: DailyIn, user: User = Depends(get_current_us
     daily.adjust_reason = body.condition_note or None if data.get("adjusted") else None
     daily.status = "ready"
     db.add(daily)
+
+    # 컨디션/날씨 반영으로 세션이 조정된 경우, 변경된 세션 메타를 주간 계획(PlanSession)에도
+    # 반영한다 — 오늘 탭에서의 조정이 이번 주 탭에도 보이도록. 이미 수행(done/partial)한
+    # 세션은 덮어쓰지 않는다(weeks 조정과 동일한 보존 가드).
+    sdata = data.get("session")
+    session_updated = False
+    if data.get("adjusted") and isinstance(sdata, dict) and sess.status not in ("done", "partial"):
+        sess.kind = sdata.get("kind", sess.kind)
+        sess.title = sdata.get("title", sess.title)
+        sess.distance_km = sdata.get("distance_km", sess.distance_km)
+        sess.duration_min = sdata.get("duration_min", sess.duration_min)
+        sess.duration_min_max = sdata.get("duration_min_max", sess.duration_min_max)
+        sess.target_pace = sdata.get("target_pace", sess.target_pace)
+        sess.focus = sdata.get("focus", sess.focus)
+        sess.note = sdata.get("note", sess.note)
+        sess.is_rest = bool(sdata.get("is_rest", sess.is_rest))
+        session_updated = True
+    daily.session_updated = session_updated
+
     await db.commit()
     return {"plan_date": today.isoformat(), "sections": daily.sections,
-            "is_adjusted": daily.is_adjusted}
+            "is_adjusted": daily.is_adjusted, "session_updated": session_updated}

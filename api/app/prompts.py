@@ -107,11 +107,26 @@ DAILY_PLAN_PROMPT = COACHING_PHILOSOPHY + """
   "cooldown": "이지 조깅 10분 + 정적 스트레칭",
   "note": "코치 한 줄 메모(조정 이유/핵심 주의). 없으면 null",
   "adjusted": false,
-  "detail": "#### 워밍업 (10분)\\n- ...\\n#### 메인 세트 (N분)\\n- ...\\n#### 쿨다운 (10분)\\n- ..."
+  "detail": "#### 워밍업 (10분)\\n- ...\\n#### 메인 세트 (N분)\\n- ...\\n#### 쿨다운 (10분)\\n- ...",
+  "session": null
 }
 ```
 - warmup/main/cooldown/note는 마크다운 기호 없이 1줄.
 - detail은 마크다운 자유 — 시간·거리·페이스·심박·횟수를 반드시 포함.
+- session: 주간 계획의 오늘 세션을 **실제로 바꾼 경우(adjusted=true)에만** 아래 객체로 채운다.
+  종류(예: 휴식→달리기)·거리·강도가 그대로면 null. 이 값은 이번 주 계획표에 그대로 반영된다.
+```json
+  "session": {
+    "kind": "<""" + KIND_KEYS + """>",
+    "title": "변경된 세션명",
+    "distance_km": 6,
+    "duration_min": 35,
+    "duration_min_max": null,
+    "target_pace": "5:30/km",
+    "focus": "세션 목적 한 줄",
+    "is_rest": false
+  }
+```
 """ + COMMON_TAIL
 
 WORKOUT_REVIEW_PROMPT = COACHING_PHILOSOPHY + """

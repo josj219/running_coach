@@ -137,6 +137,7 @@ class DailyPlan(Base):
     session_id: Mapped[int | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
     sections: Mapped[dict] = mapped_column(JSON, default=dict)  # {warmup,main,cooldown,note,detail}
     is_adjusted: Mapped[bool] = mapped_column(Boolean, default=False)
+    session_updated: Mapped[bool] = mapped_column(Boolean, default=False)  # 조정이 주간 세션에 반영됐는지
     adjust_reason: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="ready")  # generating|ready|error
     raw_md: Mapped[str | None] = mapped_column(Text)
@@ -266,6 +267,7 @@ _ADDED_COLUMNS = [
     ("workout_reviews", "summary", "TEXT"),
     ("users", "password_hash", "TEXT"),
     ("users", "onboarded", "BOOLEAN DEFAULT FALSE"),
+    ("daily_plans", "session_updated", "BOOLEAN DEFAULT FALSE"),
 ]
 
 

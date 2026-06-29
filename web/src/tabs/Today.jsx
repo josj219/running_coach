@@ -116,6 +116,13 @@ function DailyCard({ data, session, planDate, recoverTick = 0, onGenerated }) {
       <SectionLabel trailing={<span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
         color: w.color, fontWeight: 600 }}><Icon name="Sparkles" size={13} color={w.color} /> AI 설계{data.is_adjusted ? ' · 조정됨' : ''}</span>}>
         오늘 훈련 상세</SectionLabel>
+      {data.session_updated && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 2px 9px',
+          fontSize: 13, fontWeight: 600, color: w.color }}>
+          <Icon name="CalendarDays" size={14} color={w.color} />
+          이번 주 계획에도 반영했어요
+        </div>
+      )}
       <Card pad={0}>
         {rows.map((r, i) => (
           <div key={i} onClick={s.detail ? () => setOpenDetail(!openDetail) : undefined}

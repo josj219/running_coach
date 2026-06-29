@@ -419,3 +419,100 @@ async def test_31_daily_plan_includes_availability(client, monkeypatch):
         return
     assert r.status_code == 201
     assert "정기 훈련 가능 시간(기본 시간표)" in captured["message"]
+
+
+async def test_32_daily_adjustment_propagates_to_weekly_session(client, monkeypatch):
+    """당일 카드가 컨디션 반영으로 조정되면(adjusted+session) 그 변경이
+    이번 주 계획의 해당 PlanSession에도 반영된다 — 오늘 탭→주간 탭 동기화."""
+    # 이번 주 계획 재생성 — 평일(미수행) 세션을 planned 상태로 보장
+    wk = (await client.post("/api/weekly-plans", json={})).json()
+    week_start = date.fromisoformat(wk["week_start"])
+    target = week_start + timedelta(days=2)  # 수요일 — 미수행 세션을 타깃
+
+    # daily 엔드포인트의 '오늘'을 수요일로 고정 (공유 DB에서 오늘=월은 done 상태)
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return target
+
+    monkeypatch.setattr("app.routers.daily_plans.date", FakeDate)
+
+    async def fake_generate(kind, system_prompt, user_message, **kw):
+        return {
+            "warmup": "이지 조깅 10분", "main": "템포 6km @ 5:30/km",
+            "cooldown": "이지 조깅 10분", "note": "오늘 뛰고 싶다는 요청 반영",
+            "adjusted": True,
+            "detail": "#### 메인\n- 템포 6km",
+            "session": {
+                "kind": "tempo", "title": "템포런 6km", "distance_km": 6,
+                "duration_min": 35, "duration_min_max": None,
+                "target_pace": "5:30/km", "focus": "역치 자극", "is_rest": False,
+            },
+        }
+
+    monkeypatch.setattr("app.routers.daily_plans.coach.generate", fake_generate)
+
+    r = await client.post("/api/daily-plans", json={"condition_note": "오늘 뛰고 싶어요"})
+    assert r.status_code == 201
+    assert r.json()["is_adjusted"] is True
+
+    # 이번 주 탭(주간 계획)에 반영됐는지 확인
+    week = (await client.get("/api/weeks/current")).json()
+    sess = next(s for s in week["sessions"] if s["session_date"] == target.isoformat())
+    assert sess["kind"] == "tempo"
+    assert sess["is_rest"] is False
+    assert sess["distance_km"] == 6
+    assert sess["title"] == "템포런 6km"
+
+
+async def test_33_daily_adjustment_preserves_completed_session(client, monkeypatch):
+    """이미 수행(done/partial)한 오늘 세션은 당일 카드 조정으로 덮어쓰지 않는다."""
+    today_payload = (await client.get("/api/today")).json()
+    sess = today_payload["session"]
+    if sess is None or sess["status"] not in ("done", "partial"):
+        return  # 오늘 세션이 미수행이면 이 가드 시나리오 아님 → 스킵
+    original_kind = sess["kind"]
+
+    async def fake_generate(kind, system_prompt, user_message, **kw):
+        return {
+            "warmup": "이지 조깅", "main": "템포 6km", "cooldown": "이지 조깅",
+            "note": "조정", "adjusted": True, "detail": "...",
+            "session": {"kind": "tempo", "title": "덮어쓰면 안 됨",
+                        "distance_km": 6, "is_rest": False},
+        }
+
+    monkeypatch.setattr("app.routers.daily_plans.coach.generate", fake_generate)
+    r = await client.post("/api/daily-plans", json={"condition_note": "뛰고 싶어요"})
+    assert r.status_code == 201
+
+    after = (await client.get("/api/today")).json()["session"]
+    assert after["kind"] == original_kind  # 완료 세션은 보존
+    assert after["status"] in ("done", "partial")
+
+
+async def test_34_today_exposes_session_updated_flag(client, monkeypatch):
+    """주간 반영이 일어난 날은 /api/today가 session_updated=True를 내려준다 — 오늘 탭 확인 문구용."""
+    wk = (await client.post("/api/weekly-plans", json={})).json()
+    target = date.fromisoformat(wk["week_start"]) + timedelta(days=2)  # 수요일
+
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return target
+
+    monkeypatch.setattr("app.routers.daily_plans.date", FakeDate)
+    monkeypatch.setattr("app.routers.today.date", FakeDate)
+
+    async def fake_generate(kind, system_prompt, user_message, **kw):
+        return {
+            "warmup": "조깅 10분", "main": "템포 6km", "cooldown": "조깅 10분",
+            "note": "오늘 뛰고 싶다는 요청 반영", "adjusted": True, "detail": "...",
+            "session": {"kind": "tempo", "title": "템포런 6km", "distance_km": 6,
+                        "is_rest": False},
+        }
+
+    monkeypatch.setattr("app.routers.daily_plans.coach.generate", fake_generate)
+
+    await client.post("/api/daily-plans", json={"condition_note": "오늘 뛰고 싶어요"})
+    today = (await client.get("/api/today")).json()
+    assert today["daily_plan"]["session_updated"] is True
