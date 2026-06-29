@@ -192,6 +192,95 @@ const TONES = [
   { v: 'strict', label: '엄격한 코치형' },
 ];
 
+// 가민 연결: 이메일/비번 → (필요시) MFA 코드 → 연결됨/해제
+function GarminCard({ garmin, onChanged }) {
+  const [mode, setMode] = useState('idle');        // idle | form | mfa | busy
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [mfaToken, setMfaToken] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState(null);
+
+  const inputS = { width: '100%', border: 'none', outline: 'none', background: 'var(--fill-tertiary)',
+    borderRadius: 11, padding: '11px 13px', fontSize: 15, color: 'var(--label-primary)', marginBottom: 8 };
+
+  const connect = async () => {
+    setError(null); setMode('busy');
+    try {
+      const r = await api.garminConnect({ email, password });
+      setPassword('');
+      if (r.mfa_required) { setMfaToken(r.mfa_token); setMode('mfa'); return; }
+      onChanged();
+    } catch (e) { setError(e.message || '연결 실패'); setMode('form'); }
+  };
+  const submitMfa = async () => {
+    setError(null); setMode('busy');
+    try { await api.garminMfa({ mfa_token: mfaToken, code }); setCode(''); onChanged(); }
+    catch (e) { setError(e.message || 'MFA 실패'); setMode('mfa'); }
+  };
+
+  return (
+    <div style={{ borderTop: '0.5px solid var(--separator-non-opaque)', display: 'flex', gap: 12,
+      padding: '14px 16px', alignItems: 'flex-start' }}>
+      <span style={{ width: 34, height: 34, borderRadius: 10, background: '#11A9ED', display: 'grid',
+        placeItems: 'center', flex: 'none' }}><Icon name="Watch" size={18} color="#fff" /></span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, flex: 1 }}>Garmin</div>
+          {garmin?.connected ? (
+            <button onClick={async () => { await api.garminDisconnect(); onChanged(); }}
+              style={{ border: 'none', background: 'var(--fill-tertiary)', color: 'var(--accent-red)',
+                fontWeight: 600, fontSize: 13.5, borderRadius: 999, padding: '7px 13px', cursor: 'pointer' }}>해제</button>
+          ) : mode === 'idle' ? (
+            <button onClick={() => setMode('form')}
+              style={{ border: 'none', background: '#11A9ED', color: '#fff', fontWeight: 700, fontSize: 13.5,
+                borderRadius: 999, padding: '7px 14px', cursor: 'pointer' }}>연결</button>
+          ) : null}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--label-secondary)', marginTop: 2 }}>
+          {garmin?.connected
+            ? `연결됨${garmin.athlete_name ? ` · ${garmin.athlete_name}` : ''}`
+            : '가민 커넥트 로그인 · 비밀번호는 저장하지 않아요'}
+        </div>
+
+        {mode === 'form' && (
+          <div style={{ marginTop: 10 }} className="anim-in">
+            <input style={inputS} placeholder="가민 커넥트 이메일" value={email}
+              onChange={(e) => setEmail(e.target.value)} inputMode="email" />
+            <input style={inputS} placeholder="비밀번호" type="password" value={password}
+              onChange={(e) => setPassword(e.target.value)} />
+            {error && <div style={{ marginBottom: 8 }}><Banner tone="error">{error}</Banner></div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setMode('idle'); setError(null); }}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 11, border: 'none', cursor: 'pointer',
+                  background: 'var(--fill-tertiary)', color: 'var(--label-secondary)', fontWeight: 600 }}>취소</button>
+              <button onClick={connect} disabled={!email || !password}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 11, border: 'none', cursor: 'pointer',
+                  background: '#11A9ED', color: '#fff', fontWeight: 700 }}>연결</button>
+            </div>
+          </div>
+        )}
+        {mode === 'mfa' && (
+          <div style={{ marginTop: 10 }} className="anim-in">
+            <input style={inputS} placeholder="2단계 인증 코드" value={code} inputMode="numeric"
+              onChange={(e) => setCode(e.target.value)} />
+            {error && <div style={{ marginBottom: 8 }}><Banner tone="error">{error}</Banner></div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { setMode('idle'); setCode(''); setError(null); }}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 11, border: 'none', cursor: 'pointer',
+                  background: 'var(--fill-tertiary)', color: 'var(--label-secondary)', fontWeight: 600 }}>취소</button>
+              <button onClick={submitMfa} disabled={!code}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 11, border: 'none', cursor: 'pointer',
+                  background: '#11A9ED', color: '#fff', fontWeight: 700 }}>코드 확인</button>
+            </div>
+          </div>
+        )}
+        {mode === 'busy' && <div style={{ fontSize: 13, color: 'var(--label-secondary)', marginTop: 8 }}>처리 중…</div>}
+      </div>
+    </div>
+  );
+}
+
 function Row({ icon, iconBg, label, value, onClick, danger }) {
   return (
     <button onClick={onClick} disabled={!onClick}
@@ -397,17 +486,7 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
                     borderRadius: 999, padding: '7px 14px', cursor: 'pointer' }}>연결</button>
               )}
             </div>
-            <div style={{ borderTop: '0.5px solid var(--separator-non-opaque)', display: 'flex', gap: 12,
-              padding: '14px 16px', alignItems: 'flex-start' }}>
-              <span style={{ width: 34, height: 34, borderRadius: 10, background: '#11A9ED', display: 'grid',
-                placeItems: 'center', flex: 'none' }}><Icon name="Watch" size={18} color="#fff" /></span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Garmin</div>
-                <div style={{ fontSize: 13, color: 'var(--label-secondary)', lineHeight: 1.45, marginTop: 2 }}>
-                  Garmin Connect 앱 → 설정 → 연결된 앱에서 <b>Strava 자동 업로드</b>를 켜면
-                  Strava 연동 하나로 가민 기록이 자동으로 들어와요.</div>
-              </div>
-            </div>
+            <GarminCard garmin={integ?.garmin} onChanged={load} />
           </Card>
         </div>
 
