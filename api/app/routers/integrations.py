@@ -125,7 +125,7 @@ async def strava_activities(limit: int = 5, user: User = Depends(get_current_use
         except strava.StravaError:
             pass  # 캐시로 응답
     res = await db.execute(select(ExternalActivity).where(
-        ExternalActivity.user_id == user.id,
+        ExternalActivity.user_id == user.id, ExternalActivity.provider == "strava",
     ).order_by(ExternalActivity.start_date.desc()).limit(limit))
     return {"items": [_activity_dict(a) for a in res.scalars()]}
 
@@ -168,7 +168,7 @@ async def garmin_connect(body: GarminConnectBody, user: User = Depends(get_curre
     try:
         res = await asyncio.to_thread(garmin.begin_login, body.email, body.password)
     except garmin.GarminError as e:
-        raise HTTPException(401, {"code": "GARMIN_AUTH", "message": str(e)})
+        raise HTTPException(400, {"code": "GARMIN_AUTH", "message": str(e)})
     if res["status"] == "mfa":
         return {"mfa_required": True, "mfa_token": res["mfa_token"]}
     await _store_garmin(db, user.id, res)
@@ -181,7 +181,7 @@ async def garmin_mfa(body: GarminMfaBody, user: User = Depends(get_current_user)
     try:
         res = await asyncio.to_thread(garmin.complete_mfa, body.mfa_token, body.code)
     except garmin.GarminError as e:
-        raise HTTPException(401, {"code": "GARMIN_MFA", "message": str(e)})
+        raise HTTPException(400, {"code": "GARMIN_MFA", "message": str(e)})
     await _store_garmin(db, user.id, res)
     return {"connected": True, "athlete_name": res.get("athlete_name")}
 

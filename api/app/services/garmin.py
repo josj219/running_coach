@@ -5,6 +5,7 @@ Garmin은 개인에게 공식 OAuth를 제공하지 않아, 사용자 대신 로
 """
 
 import asyncio
+import logging
 import secrets
 import time
 from datetime import datetime, timezone
@@ -15,10 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import ExternalActivity, Integration
 
+logger = logging.getLogger(__name__)
+
 RUN_KEYS = {"running", "trail_running", "treadmill_running", "virtual_run",
             "track_running", "indoor_running", "ultra_run", "obstacle_run"}
 
 # MFA 진행 중인 세션 캐시: mfa_token -> (client, state, expires_at)
+# NOTE: 프로세스 로컬 — 단일 uvicorn worker 배포(self-hosted 런북 기준)를 전제한다.
 _PENDING: dict[str, tuple] = {}
 _MFA_TTL = 300  # 5분
 
@@ -87,7 +91,8 @@ def begin_login(email: str, password: str) -> dict:
         client = Garmin(email=email, password=password, return_on_mfa=True)
         res = client.login()
     except Exception as e:
-        raise GarminError("가민 로그인 실패: 이메일/비밀번호를 확인해 주세요.") from e
+        logger.exception("Garmin begin_login failed")
+        raise GarminError("가민 로그인에 실패했어요. 이메일/비밀번호를 확인하거나 잠시 후 다시 시도해 주세요.") from e
 
     # 실제 라이브러리: login() 반환값은 (mfa_status, legacy_token)
     # MFA 필요: res[0] == "needs_mfa", res[1] == state dict

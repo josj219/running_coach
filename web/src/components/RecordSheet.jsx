@@ -138,7 +138,9 @@ function StravaImport({ onPick }) {
       if (integ.garmin?.connected) calls.push(api.garminActivities(5));
       if (!calls.length) { setState('off'); return; }
       const results = await Promise.all(calls);
-      const merged = results.flatMap((r) => r.items)
+      const byId = new Map();
+      results.flatMap((r) => r.items).forEach((a) => { if (!byId.has(a.id)) byId.set(a.id, a); });
+      const merged = [...byId.values()]
         .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''))
         .slice(0, 5);
       if (!merged.length) { setState('empty'); return; }

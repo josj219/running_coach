@@ -197,3 +197,13 @@ async def test_garmin_connect_mfa(client, monkeypatch):
     r = await client.post("/api/integrations/garmin/connect",
                           json={"email": "a@b.com", "password": "pw"})
     assert r.json()["mfa_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_garmin_connect_failure_returns_400_not_401(client, monkeypatch):
+    def boom(email, password):
+        raise garmin.GarminError("bad creds")
+    monkeypatch.setattr(garmin, "begin_login", boom)
+    r = await client.post("/api/integrations/garmin/connect",
+                          json={"email": "a@b.com", "password": "x"})
+    assert r.status_code == 400   # NOT 401 — 401 would log the user out of the app
