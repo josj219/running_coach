@@ -133,10 +133,16 @@ function StravaImport({ onPick }) {
     setState('loading');
     try {
       const integ = await api.integrations();
-      if (!integ.strava.connected) { setState('off'); return; }
-      const res = await api.stravaActivities(5);
-      if (!res.items.length) { setState('empty'); return; }
-      setItems(res.items);
+      const calls = [];
+      if (integ.strava?.connected) calls.push(api.stravaActivities(5));
+      if (integ.garmin?.connected) calls.push(api.garminActivities(5));
+      if (!calls.length) { setState('off'); return; }
+      const results = await Promise.all(calls);
+      const merged = results.flatMap((r) => r.items)
+        .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''))
+        .slice(0, 5);
+      if (!merged.length) { setState('empty'); return; }
+      setItems(merged);
       setState('list');
     } catch { setState('empty'); }
   };
@@ -149,7 +155,7 @@ function StravaImport({ onPick }) {
         <span style={{ width: 40, height: 40, borderRadius: 12, background: '#FC4C02', display: 'grid', placeItems: 'center', flex: 'none' }}>
           <Icon name="Zap" size={20} color="#fff" /></span>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--label-primary)' }}>Strava에서 가져오기</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--label-primary)' }}>연동에서 가져오기</div>
           <div style={{ fontSize: 13, color: 'var(--label-secondary)' }}>거리·시간·페이스·심박 자동 입력</div>
         </div>
         <Icon name="ChevronRight" size={18} color="var(--label-tertiary)" />
@@ -157,7 +163,7 @@ function StravaImport({ onPick }) {
     );
   }
   if (state === 'loading') return <div style={{ padding: 14, fontSize: 14, color: 'var(--label-secondary)' }}>활동 불러오는 중…</div>;
-  if (state === 'off') return <Banner tone="info">설정 탭에서 Strava를 연결하면 기록이 자동으로 채워져요.</Banner>;
+  if (state === 'off') return <Banner tone="info">설정 탭에서 Strava·가민을 연결하면 기록이 자동으로 채워져요.</Banner>;
   if (state === 'empty') return <Banner tone="info">가져올 러닝 활동이 없어요. 직접 입력해 주세요.</Banner>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -223,7 +229,7 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
     setForm((p) => ({ ...p, distance: String(a.distance_km ?? ''), minutes: String(min), seconds: String(sec),
       pace: a.avg_pace || '', avgHr: a.avg_hr ? String(a.avg_hr) : '', maxHr: a.max_hr ? String(a.max_hr) : '',
       cadence: a.cadence ? String(a.cadence) : '' }));
-    setSource('strava');
+    setSource(a.provider || 'strava');
     setExternalId(a.external_id);
     setDetailOpen(true);
   };
