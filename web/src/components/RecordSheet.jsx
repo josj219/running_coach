@@ -39,12 +39,15 @@ function FieldLabel({ children }) {
 
 function NumInput({ value, onChange, placeholder, unit, flex = 1, mode = 'decimal' }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--fill-tertiary)', borderRadius: 12, padding: '11px 14px', flex }}>
+    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--fill-tertiary)', borderRadius: 12,
+      padding: '11px 12px', flex, minWidth: 0, overflow: 'hidden' }}>
       <input type="text" inputMode={mode} value={value} onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        style={{ border: 'none', outline: 'none', background: 'none', flex: 1, fontFamily: 'var(--font-display)',
-          fontSize: 22, fontWeight: 700, color: 'var(--label-primary)', letterSpacing: '-0.5px', width: '100%', minWidth: 0 }} />
-      {unit && <span style={{ fontSize: 14, color: 'var(--label-tertiary)', fontWeight: 600, marginLeft: 4 }}>{unit}</span>}
+        style={{ border: 'none', outline: 'none', background: 'none', flex: '1 1 auto', minWidth: 0,
+          fontFamily: 'var(--font-display)', fontSize: 19, fontWeight: 700, color: 'var(--label-primary)',
+          letterSpacing: '-0.3px' }} />
+      {unit && <span style={{ fontSize: 13, color: 'var(--label-tertiary)', fontWeight: 600, marginLeft: 3,
+        flex: 'none', whiteSpace: 'nowrap' }}>{unit}</span>}
     </div>
   );
 }
@@ -134,15 +137,15 @@ function StravaImport({ onPick }) {
     try {
       const integ = await api.integrations();
       const calls = [];
-      if (integ.strava?.connected) calls.push(api.stravaActivities(5));
-      if (integ.garmin?.connected) calls.push(api.garminActivities(5));
+      if (integ.strava?.connected) calls.push(api.stravaActivities(3));
+      if (integ.garmin?.connected) calls.push(api.garminActivities(3));
       if (!calls.length) { setState('off'); return; }
       const results = await Promise.all(calls);
       const byId = new Map();
       results.flatMap((r) => r.items).forEach((a) => { if (!byId.has(a.id)) byId.set(a.id, a); });
       const merged = [...byId.values()]
         .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''))
-        .slice(0, 5);
+        .slice(0, 3);
       if (!merged.length) { setState('empty'); return; }
       setItems(merged);
       setState('list');
@@ -218,6 +221,8 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
   const [review, setReview] = useState(null);
   const [source, setSource] = useState(existingLog?.source || 'manual');
   const [externalId, setExternalId] = useState(null);
+  // 연동/사진으로 값을 채우면 위쪽 가져오기 영역을 접는다 ('다시 고르기'로 복원)
+  const [imported, setImported] = useState(false);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -234,7 +239,11 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
     setSource(a.provider || 'strava');
     setExternalId(a.external_id);
     setDetailOpen(true);
+    setImported(true);
   };
+
+  // 가져오기 영역 복원 — 채운 값은 유지하고 목록만 다시 노출
+  const resetImport = () => { setImported(false); setSource('manual'); setExternalId(null); };
 
   // 이미지 분석 결과로 폼 채움 — 인식 안 된 값(null)은 기존 입력 유지
   const fillFromExtract = (d) => {
@@ -251,6 +260,7 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
     setSource('image');
     setExternalId(null);
     setDetailOpen(true);
+    setImported(true);
   };
 
   const maxPain = Math.max(0, ...pain.map((p) => painLevels[p] || 3));
@@ -383,11 +393,12 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
 
       {phase === 'form' && (
         <div style={{ padding: '16px 20px 24px' }}>
-          {!noRun && <StravaImport onPick={pickActivity} />}
-          {!noRun && <ImageImport onExtract={fillFromExtract} />}
-          {!noRun && source === 'image' && (
-            <div style={{ marginTop: 8 }}>
-              <Banner tone="info">이미지에서 값을 채웠어요. 숫자를 확인하고 저장하세요.</Banner></div>
+          {!noRun && !imported && <StravaImport onPick={pickActivity} />}
+          {!noRun && !imported && <ImageImport onExtract={fillFromExtract} />}
+          {!noRun && imported && (
+            <div style={{ marginBottom: 4 }}>
+              <Banner tone="info" action="다시 고르기" onAction={resetImport}>
+                {source === 'image' ? '이미지에서 값을 채웠어요.' : '연동 기록을 불러왔어요.'} 숫자를 확인하고 저장하세요.</Banner></div>
           )}
 
           {/* 달리기 기록이 없는 날 — 수치 입력 없이 소감 기반으로 기록 */}
