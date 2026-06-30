@@ -151,7 +151,7 @@ GET https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.9780&d
 | ...  |            |            |          |
 
 [러닝 세션인 경우 추가]
-- 목표 페이스: km당 {페이스}
+- 목표 페이스: km당 {페이스}  (※ 헬스장 트레드밀이면 "{속도} km/h ({페이스}/km)"로 표기 — 예: 9.0 km/h (6:40/km))
 - 목표 심박: {N}-{N} bpm
 - 목표 케이던스: {N} spm
 - 추천 코스: {코스 설명}

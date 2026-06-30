@@ -17,6 +17,9 @@ COMMON_TAIL = """
 - 추가 질문 없이 주어진 입력만으로 즉시 생성한다. 정보가 부족하면 합리적 가정을 명시하고 진행한다.
 """
 
+# 헬스장 트레드밀 세션의 속도 표기 규칙(주간/당일/조정 계획에 공통 주입)
+TREADMILL_PACE_RULE = """- 헬스장 트레드밀 세션의 속도(target_pace)는 트레드밀에 입력하는 **속도(km/h)를 먼저** 쓰고 분당 페이스를 괄호로 병기한다 (예: "9.0 km/h (6:40/km)"). 트레드밀에 그대로 입력할 숫자가 앞에 와야 한다. 야외 러닝은 종전대로 페이스(분/km)만 쓴다. 환산: 속도(km/h) = 60 ÷ 페이스(분/km)."""
+
 # kind 키는 앱 공통 영문 enum
 KIND_KEYS = "easy|interval|tempo|long|race|rest|strength|drill|core|mobility|other"
 
@@ -67,7 +70,7 @@ WEEKLY_PLAN_PROMPT = COACHING_PHILOSOPHY + """
       "distance_km": 5,
       "duration_min": 40,
       "duration_min_max": null,
-      "target_pace": "6:30~7:00 /km",
+      "target_pace": "8.6~9.2 km/h (7:00~6:30/km)",
       "focus": "이 세션을 왜 하는지 — 훈련 목적과 기대 효과 한 줄",
       "note": "세트·폼 포인트 등 상세(불릿 마크다운 허용)",
       "is_rest": false
@@ -83,7 +86,7 @@ WEEKLY_PLAN_PROMPT = COACHING_PHILOSOPHY + """
   세션 전체 시간은 duration_min으로만 표현한다.
 - focus는 목적 서술이다 — 동작·메뉴 나열 금지(동작 목록은 note에).
   (나쁜 예: "High Knees·Ankling·A-skip" / 좋은 예: "복귀 2주차 신경근 활성화 — 러닝 폼 효율 회복")
-""" + COMMON_TAIL
+""" + TREADMILL_PACE_RULE + COMMON_TAIL
 
 DAILY_PLAN_PROMPT = COACHING_PHILOSOPHY + """
 
@@ -127,7 +130,7 @@ DAILY_PLAN_PROMPT = COACHING_PHILOSOPHY + """
     "is_rest": false
   }
 ```
-""" + COMMON_TAIL
+""" + TREADMILL_PACE_RULE + COMMON_TAIL
 
 WORKOUT_REVIEW_PROMPT = COACHING_PHILOSOPHY + """
 
@@ -201,7 +204,7 @@ PLAN_ADJUSTMENT_PROMPT = COACHING_PHILOSOPHY + """
 }
 ```
 - changes에는 실제로 바뀌는 세션만 넣는다. 변경 불필요하면 빈 배열.
-""" + COMMON_TAIL
+""" + TREADMILL_PACE_RULE + COMMON_TAIL
 
 WORKOUT_IMAGE_EXTRACT_PROMPT = """# 역할: 운동 기록 스크린샷에서 수치 추출
 
