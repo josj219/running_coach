@@ -41,6 +41,7 @@ class ProfilePatch(BaseModel):
     pb_half: str | None = None
     pb_full: str | None = None
     body_note: str | None = None
+    avatar_url: str | None = None
 
 
 @router.patch("/profile")

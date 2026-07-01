@@ -6,6 +6,28 @@ import { Banner, Card, CTA, Icon, NavBarLarge, SectionLabel, Spinner } from '../
 
 const CURRENT_YEAR = new Date().getFullYear();
 
+// 프로필 사진: 정사각 센터 크롭 + 축소해 data URL(jpeg)로 변환 — 작게 보관(프로필에 직접 저장)
+async function fileToAvatarDataUrl(file, size = 256, quality = 0.82) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('파일을 읽지 못했어요.'));
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('이미지를 열지 못했어요.'));
+    im.src = dataUrl;
+  });
+  const edge = Math.min(img.width, img.height);
+  const sx = (img.width - edge) / 2, sy = (img.height - edge) / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  canvas.getContext('2d').drawImage(img, sx, sy, edge, edge, 0, 0, size, size);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
 // HH:MM:SS 세그먼트 입력
 function TimeInput({ label, value, onChange }) {
   const parts = (value || '').split(':');
@@ -323,6 +345,8 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
   const [form, setForm] = useState({});
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
+  const [avatarErr, setAvatarErr] = useState(null);
+  const avatarInputRef = useRef(null);
 
   const load = async () => {
     try {
@@ -344,6 +368,19 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
     <div style={{ padding: '8px 16px' }}><Banner tone="error" action="재시도" onAction={load}>{error}</Banner></div></div>;
   if (!profile || !settings) return <div><NavBarLarge title="설정" /><Spinner /></div>;
 
+  const onPickAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';  // 같은 파일 재선택 허용
+    if (!file) return;
+    setAvatarErr(null);
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setForm((f) => ({ ...f, avatar_url: dataUrl }));
+    } catch (err) {
+      setAvatarErr(err.message || '사진을 불러오지 못했어요.');
+    }
+  };
+
   const saveProfile = async () => {
     const age = form.birth_year ? CURRENT_YEAR - parseInt(form.birth_year, 10) : null;
     await api.patchProfile({
@@ -351,8 +388,9 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
       career_years: parseFloat(form.career_years) || null,
       height_cm: parseFloat(form.height_cm) || null, weight_kg: parseFloat(form.weight_kg) || null,
       pb_10k: form.pb_10k || null, pb_half: form.pb_half || null, pb_full: form.pb_full || null,
+      avatar_url: form.avatar_url || null,
     });
-    setEditing(null); load();
+    setEditing(null); setAvatarErr(null); load();
   };
   const saveGoal = async () => {
     await api.putGoal({
@@ -382,6 +420,31 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
           <Card pad={editing === 'profile' ? 16 : 0}>
             {editing === 'profile' ? (
               <div className="anim-in">
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 14 }}>
+                  <button onClick={() => avatarInputRef.current?.click()} aria-label="프로필 사진 변경"
+                    style={{ position: 'relative', width: 84, height: 84, padding: 0, border: 'none',
+                      background: 'none', cursor: 'pointer' }}>
+                    {form.avatar_url ? (
+                      <img src={form.avatar_url} alt="프로필"
+                        style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
+                    ) : (
+                      <span style={{ width: 84, height: 84, borderRadius: '50%', display: 'grid', placeItems: 'center',
+                        background: 'linear-gradient(135deg, var(--tint), var(--accent-indigo))',
+                        fontSize: 32, fontWeight: 800, color: '#fff' }}>{(form.nickname || '러')[0]}</span>
+                    )}
+                    <span style={{ position: 'absolute', right: -2, bottom: -2, width: 28, height: 28, borderRadius: '50%',
+                      background: 'var(--tint)', display: 'grid', placeItems: 'center',
+                      border: '2px solid var(--bg-grouped-secondary)' }}>
+                      <Icon name="Camera" size={14} color="#fff" /></span>
+                  </button>
+                  <input ref={avatarInputRef} type="file" accept="image/*" onChange={onPickAvatar} style={{ display: 'none' }} />
+                  {form.avatar_url && (
+                    <button onClick={() => setForm({ ...form, avatar_url: null })}
+                      style={{ marginTop: 8, background: 'none', border: 'none', color: 'var(--accent-red)',
+                        fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>사진 제거</button>
+                  )}
+                </div>
+                {avatarErr && <div style={{ marginBottom: 10 }}><Banner tone="error">{avatarErr}</Banner></div>}
                 <EditField label="닉네임" value={form.nickname} onChange={(v) => setForm({ ...form, nickname: v })} />
                 <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}><EditField label="키 (cm)" value={form.height_cm} mode="decimal" onChange={(v) => setForm({ ...form, height_cm: v })} /></div>
@@ -399,9 +462,14 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
             ) : (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 16px 12px' }}>
-                  <span style={{ width: 54, height: 54, borderRadius: '50%', background: 'linear-gradient(135deg, var(--tint), var(--accent-indigo))',
-                    display: 'grid', placeItems: 'center', fontSize: 22, fontWeight: 800, color: '#fff' }}>
-                    {(profile.nickname || '러')[0]}</span>
+                  {profile.avatar_url ? (
+                    <img src={profile.avatar_url} alt="프로필"
+                      style={{ width: 54, height: 54, borderRadius: '50%', objectFit: 'cover', flex: 'none' }} />
+                  ) : (
+                    <span style={{ width: 54, height: 54, borderRadius: '50%', background: 'linear-gradient(135deg, var(--tint), var(--accent-indigo))',
+                      display: 'grid', placeItems: 'center', fontSize: 22, fontWeight: 800, color: '#fff', flex: 'none' }}>
+                      {(profile.nickname || '러')[0]}</span>
+                  )}
                   <div>
                     <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700 }}>{profile.nickname}</div>
                     <div style={{ fontSize: 13.5, color: 'var(--label-secondary)' }}>
