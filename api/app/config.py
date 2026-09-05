@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -35,6 +36,14 @@ class Settings(BaseSettings):
     api_base_url: str = "http://localhost:8000"
 
     tz: str = "Asia/Seoul"
+
+    @field_validator("smtp_port", "jwt_expire_days", "reset_code_ttl_min", mode="before")
+    @classmethod
+    def _empty_env_means_default(cls, v, info):
+        # 배포 시 미등록 Secret은 `SMTP_PORT=` 처럼 빈 문자열로 들어온다 → 기본값으로 처리(빈 값에 앱이 죽지 않게)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return cls.model_fields[info.field_name].default
+        return v
 
     class Config:
         env_file = ".env"
