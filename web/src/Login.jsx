@@ -1,18 +1,19 @@
 // 로그인 화면 — 이메일+비밀번호. 계정은 서버에서 생성(셀프 회원가입 없음).
 import React, { useState } from 'react';
 import { api, setToken } from './api.js';
-import { Banner, CTA, Icon } from './components/Ui.jsx';
-
-const inputStyle = {
-  width: '100%', border: 'none', outline: 'none', background: 'var(--fill-tertiary)',
-  borderRadius: 12, padding: '13px 15px', fontSize: 16, color: 'var(--label-primary)',
-};
+import { Banner, CTA, Icon, inputStyle } from './components/Ui.jsx';
+import ForgotPassword from './ForgotPassword.jsx';
 
 export default function Login({ onLoggedIn }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false);  // 비밀번호 재설정 화면 전환
+
+  if (forgot) {
+    return <ForgotPassword initialEmail={email} onBack={() => setForgot(false)} onLoggedIn={onLoggedIn} />;
+  }
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -52,6 +53,12 @@ export default function Login({ onLoggedIn }) {
               <CTA icon={null} busy={busy} onClick={submit}>로그인</CTA>
             </div>
           </form>
+
+          <button type="button" onClick={() => setForgot(true)}
+            style={{ display: 'block', margin: '14px auto 0', background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--tint)', fontSize: 14, fontWeight: 600, padding: 6 }}>
+            비밀번호를 잊으셨나요?
+          </button>
 
           <p style={{ fontSize: 12.5, color: 'var(--label-tertiary)', textAlign: 'center', marginTop: 18, lineHeight: 1.5 }}>
             계정이 없나요? 관리자에게 계정 생성을 요청하세요.

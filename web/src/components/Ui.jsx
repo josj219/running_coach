@@ -4,7 +4,7 @@ import {
   Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Camera, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
   CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
-  LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
+  KeyRound, LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
   StretchHorizontal, Target, Trash2, TrendingUp, Trophy, Watch, Wind, X, Zap,
 } from 'lucide-react';
 import { WEEK_DAYS, wmeta } from '../workouts.js';
@@ -13,8 +13,14 @@ const ICONS = {
   Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Camera, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
   CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
-  LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
+  KeyRound, LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
   StretchHorizontal, Target, Trash2, TrendingUp, Trophy, Watch, Wind, X, Zap,
+};
+
+// 로그인/재설정 화면 공용 텍스트 입력 스타일
+export const inputStyle = {
+  width: '100%', border: 'none', outline: 'none', background: 'var(--fill-tertiary)',
+  borderRadius: 12, padding: '13px 15px', fontSize: 16, color: 'var(--label-primary)',
 };
 
 export function Icon({ name, size = 20, color = 'currentColor', strokeWidth = 2, style }) {

@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-insecure-change-me"
     jwt_expire_days: int = 30
 
+    # 비밀번호 재설정 메일(SMTP). SMTP_HOST가 비어 있으면 메일을 보내지 않고 서버 로그에 코드만 남긴다(로컬/테스트).
+    # Gmail이면 host=smtp.gmail.com, port=587, user=내 gmail, password=앱 비밀번호(2단계 인증 필요).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""  # 비우면 smtp_user 사용
+    reset_code_ttl_min: int = 10  # 인증 코드 유효 시간(분)
+
     # Strava OAuth (https://www.strava.com/settings/api 에서 발급)
     strava_client_id: str = ""
     strava_client_secret: str = ""

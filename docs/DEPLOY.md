@@ -85,6 +85,8 @@ repo → **Settings → Secrets and variables → Actions → New repository sec
 | `TUNNEL_TOKEN` | 3번에서 복사한 터널 토큰 |
 | `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | (나중에 Strava 켤 때, 지금은 빈 값도 OK) |
 | `WEB_BASE_URL` / `API_BASE_URL` | `https://coach.내도메인` (Strava 콜백용, 없으면 빈 값) |
+| `JWT_SECRET` | 로그인 토큰 서명 키. 32자 이상 임의 문자열 (`openssl rand -hex 32`) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | 비밀번호 재설정 인증 메일용. 아래 "비밀번호 재설정 메일 설정" 참고. 비워두면 재설정 기능이 메일을 못 보낸다 |
 
 ## 6. 첫 배포
 - `main`에 push하거나, repo **Actions → deploy → Run workflow**(수동) 실행
@@ -102,6 +104,51 @@ crontab -e
 # 매일 03:30 자동 백업(7일 보관)
 30 3 * * * /home/ubuntu/performance-coach/ops/backup.sh >> /home/ubuntu/backup.log 2>&1
 ```
+
+---
+
+## 계정 관리 — 생성 · 비밀번호 재설정 · 복구
+
+앱에는 셀프 회원가입이 없다. 계정은 서버에서 만들고, 비밀번호는 앱의 이메일 인증으로 사용자가 직접 재설정한다.
+
+### 계정 만들기 (최초 1회)
+서버 터미널에서:
+```bash
+cd ~/performance-coach
+docker compose -f docker-compose.prod.yml exec -T api \
+  python -m app.create_user <이메일> <비밀번호> <닉네임>
+```
+로그인 이메일 = 여기서 넣은 이메일. 소문자로 저장되며 로그인 시 대소문자를 구분하지 않는다.
+
+### 비밀번호 재설정 메일 설정 (Gmail 기준)
+1. Google 계정 → 보안 → **2단계 인증** 켜기 (앱 비밀번호 발급 조건)
+2. https://myaccount.google.com/apppasswords → 앱 이름 `coach` → 생성 → 16자리 비밀번호 복사
+3. GitHub Secrets에 등록:
+
+| 이름 | 값 |
+|---|---|
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USER` | 내 Gmail 주소 |
+| `SMTP_PASSWORD` | 위에서 만든 16자리 앱 비밀번호 (공백 제거) |
+| `SMTP_FROM` | 내 Gmail 주소 (비워도 `SMTP_USER` 사용) |
+
+4. 재배포(Actions → deploy → Run workflow). 이후 로그인 화면의 **"비밀번호를 잊으셨나요?"** → 이메일 입력 → 메일로 온 6자리 코드 + 새 비밀번호 입력 → 바로 로그인된다.
+
+동작 규칙: 코드는 10분 유효, 1회용, 5회 틀리면 폐기(다시 받아야 함), 재발송은 60초에 1번. 존재하지 않는 이메일에도 같은 응답을 줘 계정 유무를 노출하지 않는다.
+Gmail 외 SMTP(SES, Resend 등)도 host/port/user/password만 바꾸면 된다. 465 포트를 주면 SSL, 그 외는 STARTTLS로 붙는다.
+
+### 메일이 안 될 때 수동 복구
+이메일을 잊었거나 SMTP가 아직 없으면 서버에서 직접 처리한다.
+```bash
+# 1) 등록된 계정 확인
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U coach -d coach -c "select id, email, nickname from users;"
+# 2) 비밀번호만 바꾸기 (닉네임·기록은 그대로)
+docker compose -f docker-compose.prod.yml exec -T api \
+  python -m app.create_user <이메일> <새비밀번호>
+```
+SMTP 미설정 상태에서 앱의 재설정을 시도하면 메일은 안 가고 api 로그(`logs -f api`)에 `[mailer:console]`로 코드가 찍힌다 — 급할 때 로그에서 코드를 읽어 앱에 입력해도 된다.
 
 ---
 

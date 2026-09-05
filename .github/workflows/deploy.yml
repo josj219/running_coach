@@ -4,7 +4,7 @@
 # 사전 준비(docs/DEPLOY.md 참고):
 #  - Lightsail에 self-hosted runner 등록(라벨: self-hosted, linux)
 #  - runner 사용자에 docker 권한(docker 그룹)
-#  - GitHub repo Secrets: ANTHROPIC_API_KEY, DB_PASSWORD, TUNNEL_TOKEN
+#  - GitHub repo Secrets: ANTHROPIC_API_KEY, DB_PASSWORD, JWT_SECRET, TUNNEL_TOKEN (+ SMTP_* 비밀번호 재설정 메일)
 name: deploy
 
 on:
@@ -37,6 +37,11 @@ jobs:
           STRAVA_CLIENT_SECRET=${{ secrets.STRAVA_CLIENT_SECRET }}
           WEB_BASE_URL=${{ secrets.WEB_BASE_URL }}
           API_BASE_URL=${{ secrets.API_BASE_URL }}
+          SMTP_HOST=${{ secrets.SMTP_HOST }}
+          SMTP_PORT=${{ secrets.SMTP_PORT }}
+          SMTP_USER=${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM=${{ secrets.SMTP_FROM }}
           TZ=Asia/Seoul
           EOF
 

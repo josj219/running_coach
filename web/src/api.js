@@ -45,6 +45,9 @@ async function request(path, options = {}) {
 export const api = {
   login: (email, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   me: () => request('/api/auth/me'),
+  forgotPassword: (email) => request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (email, code, new_password) =>
+    request('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, code, new_password }) }),
   onboard: (data) => request('/api/auth/onboard', { method: 'POST', body: JSON.stringify(data) }),
   today: () => request('/api/today'),
   profile: () => request('/api/profile'),
