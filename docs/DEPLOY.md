@@ -139,7 +139,14 @@ docker compose -f docker-compose.prod.yml exec -T api \
 Gmail 외 SMTP(SES, Resend 등)도 host/port/user/password만 바꾸면 된다. 465 포트를 주면 SSL, 그 외는 STARTTLS로 붙는다.
 
 ### 메일이 안 될 때 수동 복구
-이메일을 잊었거나 SMTP가 아직 없으면 서버에서 직접 처리한다.
+가장 쉬운 길은 서버 접속 없이 GitHub Actions의 **reset-password** 워크플로우를 쓰는 것이다(맥 터미널에서):
+```bash
+gh workflow run reset-password                          # 계정 목록만 출력(이메일 확인)
+gh secret set RESET_PASSWORD                            # 새 비밀번호를 프롬프트에 입력
+gh workflow run reset-password -f email=<계정 이메일>    # 변경 실행
+gh secret delete RESET_PASSWORD                         # 끝나면 삭제
+```
+서버 터미널(Lightsail 콘솔 → Connect)로 직접 처리하려면:
 ```bash
 # 1) 등록된 계정 확인
 docker compose -f docker-compose.prod.yml exec -T db \
