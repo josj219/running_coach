@@ -80,7 +80,8 @@ sudo ./svc.sh start
 repo → **Settings → Secrets and variables → Actions → New repository secret**
 | 이름 | 값 |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic 키 |
+| `DEEPSEEK_API_KEY` | DeepSeek 키 — 코치 AI(주간·당일 계획, 리뷰, 평가). `COACH_PROVIDER=deepseek`, 모델 `DEEPSEEK_MODEL`(기본 deepseek-v4-pro) |
+| `ANTHROPIC_API_KEY` | Anthropic 키 — 스크린샷 수치 추출 전용. DeepSeek은 이미지를 실제로 보지 못하고 지어내므로 이미지는 항상 Anthropic으로 보낸다. 없으면 추출 기능만 오류 안내 |
 | `DB_PASSWORD` | 임의의 강한 문자열 |
 | `TUNNEL_TOKEN` | 3번에서 복사한 터널 토큰 |
 | `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | (나중에 Strava 켤 때, 지금은 빈 값도 OK) |

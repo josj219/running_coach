@@ -120,7 +120,9 @@ async def test_09_week_progress_updated(client):
     today_sessions = [s for s in body["sessions"] if s["session_date"] == today_str()]
     if today_sessions and not today_sessions[0]["is_rest"]:
         assert body["progress"]["participated"] == 1
-        assert today_sessions[0]["status"] == "done"
+        # 기록 종류가 계획 종류와 같으면 done, 다르면 substituted(J06: 참여와 계획 이행 분리).
+        # 시드가 휴식일을 다음 날과 바꾸는 요일(목)에는 오늘 세션이 drill이라 easy 기록은 substituted가 된다.
+        assert today_sessions[0]["status"] in ("done", "substituted")
 
 
 # ── AI 리뷰 (SSE/JSON · 실패 격리) ────────────────────────────────────────

@@ -43,7 +43,13 @@ async def unhandled(request: Request, exc: Exception):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "revision": os.environ.get("APP_REVISION", "local")}
+    from .services import coach
+    return {
+        "status": "ok",
+        "revision": os.environ.get("APP_REVISION", "local"),
+        "coach_provider": coach.provider(),
+        "coach_model": coach.model_name(),
+    }
 
 
 app.include_router(auth.router)

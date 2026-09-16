@@ -10,9 +10,17 @@ class Settings(BaseSettings):
     # DB. 로컬 단독 실행 시 sqlite 폴백, compose에서는 postgres URL 주입.
     database_url: str = "sqlite+aiosqlite:///./coach.db"
 
-    # AI
+    # AI — 제공자 선택. "deepseek" | "anthropic". 비우면 DEEPSEEK_API_KEY가 있을 때 deepseek, 아니면 anthropic.
+    coach_provider: str = ""
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-4-6"
+    # DeepSeek (OpenAI 호환 API). 모델 목록은 GET https://api.deepseek.com/models 로 확인.
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    # DeepSeek 모델은 기본으로 추론(reasoning)을 먼저 출력해 55~75초 걸리고 토큰 한도를 추론에 소진할 수 있다.
+    # 기본 비활성(응답 4~8초). 켜면 max_tokens를 8192로 올린다.
+    deepseek_thinking: bool = False
     coach_mock: str = ""  # "1"이면 실 API 미호출(테스트/CI)
 
     # 인증 (이메일+비밀번호 → JWT). 운영에서는 JWT_SECRET을 반드시 환경변수로 주입.

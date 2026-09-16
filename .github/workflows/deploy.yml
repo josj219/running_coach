@@ -4,7 +4,7 @@
 # 사전 준비(docs/DEPLOY.md 참고):
 #  - Lightsail에 self-hosted runner 등록(라벨: self-hosted, linux)
 #  - runner 사용자에 docker 권한(docker 그룹)
-#  - GitHub repo Secrets: ANTHROPIC_API_KEY, DB_PASSWORD, JWT_SECRET, TUNNEL_TOKEN (+ SMTP_* 비밀번호 재설정 메일)
+#  - GitHub repo Secrets: DEEPSEEK_API_KEY(코치 AI), ANTHROPIC_API_KEY(스크린샷 수치 추출 전용), DB_PASSWORD, JWT_SECRET, TUNNEL_TOKEN (+ SMTP_* 비밀번호 재설정 메일)
 name: deploy
 
 on:
@@ -31,6 +31,9 @@ jobs:
           umask 077
           cat > .env <<EOF
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          COACH_PROVIDER=deepseek
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL=deepseek-v4-pro
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           CLAUDE_MODEL=claude-sonnet-4-6

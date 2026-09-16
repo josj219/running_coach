@@ -1,4 +1,4 @@
-"""Claude 코치 서비스 — async 호출 + COACH_MOCK 분기 + JSON 파싱.
+"""AI 코치 서비스 — DeepSeek(OpenAI 호환) 또는 Anthropic 호출 + COACH_MOCK 분기 + JSON 파싱.
 
 불변식: 사용자 데이터(로그)는 AI와 독립적으로 먼저 커밋한다. AI는 부가물.
 """
@@ -103,12 +103,82 @@ def parse_json_block(text: str) -> dict:
         raise CoachError(f"AI JSON 파싱 실패: {e}") from e
 
 
-def _client():
+def provider() -> str:
+    """사용할 제공자. COACH_PROVIDER가 비어 있으면 DEEPSEEK_API_KEY 유무로 자동 선택."""
+    s = get_settings()
+    p = (s.coach_provider or "").strip().lower()
+    if p in ("deepseek", "anthropic"):
+        return p
+    if p:
+        raise CoachError(f"지원하지 않는 COACH_PROVIDER: {s.coach_provider}")
+    return "deepseek" if s.deepseek_api_key else "anthropic"
+
+
+def model_name() -> str:
+    s = get_settings()
+    try:
+        return s.deepseek_model if provider() == "deepseek" else s.claude_model
+    except CoachError:
+        return "?"
+
+
+def _anthropic_client():
     import anthropic
     s = get_settings()
     if not s.anthropic_api_key:
         raise CoachError("ANTHROPIC_API_KEY가 설정되어 있지 않습니다.")
     return anthropic.AsyncAnthropic(api_key=s.anthropic_api_key)
+
+
+def _deepseek_client():
+    import openai
+    s = get_settings()
+    if not s.deepseek_api_key:
+        raise CoachError("DEEPSEEK_API_KEY가 설정되어 있지 않습니다.")
+    return openai.AsyncOpenAI(api_key=s.deepseek_api_key, base_url=s.deepseek_base_url)
+
+
+def _deepseek_kwargs() -> dict:
+    """추론 모드 제어. 비활성이면 reasoning_content 없이 본문만 빠르게 반환한다."""
+    s = get_settings()
+    return {
+        "max_tokens": 8192 if s.deepseek_thinking else 4096,
+        "extra_body": {"thinking": {"type": "enabled" if s.deepseek_thinking else "disabled"}},
+    }
+
+
+async def _anthropic_generate(system_prompt: str, user_message: str,
+                              image_b64: str | None, image_media_type: str) -> str:
+    s = get_settings()
+    content: list | str = user_message
+    if image_b64:
+        content = [
+            {"type": "image", "source": {"type": "base64", "media_type": image_media_type, "data": image_b64}},
+            {"type": "text", "text": user_message},
+        ]
+    resp = await _anthropic_client().messages.create(
+        model=s.claude_model, max_tokens=4096,
+        system=system_prompt,
+        messages=[{"role": "user", "content": content}],
+    )
+    return "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+
+
+async def _deepseek_generate(system_prompt: str, user_message: str,
+                             image_b64: str | None, image_media_type: str) -> str:
+    s = get_settings()
+    content: list | str = user_message
+    if image_b64:
+        content = [
+            {"type": "image_url", "image_url": {"url": f"data:{image_media_type};base64,{image_b64}"}},
+            {"type": "text", "text": user_message},
+        ]
+    resp = await _deepseek_client().chat.completions.create(
+        model=s.deepseek_model, **_deepseek_kwargs(),
+        messages=[{"role": "system", "content": system_prompt},
+                  {"role": "user", "content": content}],
+    )
+    return resp.choices[0].message.content or ""
 
 
 async def generate(kind: str, system_prompt: str, user_message: str,
@@ -123,24 +193,22 @@ async def generate(kind: str, system_prompt: str, user_message: str,
             data = {**data, "sessions": _mock_week_sessions()}
         return data
 
-    content: list | str = user_message
-    if image_b64:
-        content = [
-            {"type": "image", "source": {"type": "base64", "media_type": image_media_type, "data": image_b64}},
-            {"type": "text", "text": user_message},
-        ]
+    p = provider()
+    # 이미지(스크린샷 수치 추출)는 비전 모델이 필요. DeepSeek(v4-pro/flash)은 image_url을 받아들이지만 실제로 보지 못하고
+    # 내용을 지어내는 것을 확인했다(1x1 투명 PNG → "수염 난 남성 사진"). 수치 조작 위험이 있어 이미지는 Anthropic으로만 보낸다.
+    if image_b64 and p == "deepseek":
+        if not s.anthropic_api_key:
+            raise CoachError("스크린샷 수치 추출은 이미지 인식 모델이 필요합니다. ANTHROPIC_API_KEY를 설정하거나 수치를 직접 입력하세요.")
+        p = "anthropic"
     try:
-        client = _client()
-        resp = await client.messages.create(
-            model=s.claude_model, max_tokens=4096,
-            system=system_prompt,
-            messages=[{"role": "user", "content": content}],
-        )
+        if p == "deepseek":
+            text = await _deepseek_generate(system_prompt, user_message, image_b64, image_media_type)
+        else:
+            text = await _anthropic_generate(system_prompt, user_message, image_b64, image_media_type)
     except CoachError:
         raise
     except Exception as e:  # noqa: BLE001 — 네트워크/키/5xx 전부 503으로
-        raise CoachError(f"Claude API 호출 실패: {e}") from e
-    text = "\n".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        raise CoachError(f"AI API 호출 실패({p}): {e}") from e
     return parse_json_block(text)
 
 
@@ -163,16 +231,26 @@ async def stream_text(system_prompt: str, user_message: str) -> AsyncIterator[st
         for chunk in ["분석 ", "중입니다… ", "(mock)"]:
             yield chunk
         return
+    p = provider()
     try:
-        client = _client()
-        async with client.messages.stream(
-            model=s.claude_model, max_tokens=4096,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
-        ) as stream:
-            async for token in stream.text_stream:
-                yield token
+        if p == "deepseek":
+            stream = await _deepseek_client().chat.completions.create(
+                model=s.deepseek_model, stream=True, **_deepseek_kwargs(),
+                messages=[{"role": "system", "content": system_prompt},
+                          {"role": "user", "content": user_message}],
+            )
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        else:
+            async with _anthropic_client().messages.stream(
+                model=s.claude_model, max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            ) as stream:
+                async for token in stream.text_stream:
+                    yield token
     except CoachError:
         raise
     except Exception as e:  # noqa: BLE001
-        raise CoachError(f"Claude API 스트림 실패: {e}") from e
+        raise CoachError(f"AI API 스트림 실패({p}): {e}") from e
