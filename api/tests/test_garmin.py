@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import select
-from app.db import ExternalActivity, Integration
+from uuid import uuid4
+from app.db import ExternalActivity, Integration, User
 from app.services import garmin
 
 
@@ -63,24 +64,29 @@ async def test_sync_activities_upserts_running_only(db_session, monkeypatch):
     ]
     monkeypatch.setattr(garmin, "fetch_recent", lambda blob, limit=10: (fake, "newblob"))
 
-    integ = Integration(user_id=900001, provider="garmin", auth_blob="oldblob")
+    # PostgreSQL은 FK를 검사하므로(SQLite 기본은 미검사) 실제 사용자 행을 먼저 만든다
+    user = User(email=f"garmin-sync-{uuid4()}@test.invalid", nickname="가민")
+    db_session.add(user)
+    await db_session.flush()
+    uid = user.id
+    integ = Integration(user_id=uid, provider="garmin", auth_blob="oldblob")
     db_session.add(integ)
     await db_session.commit()
 
-    added = await garmin.sync_activities(db_session, integ, user_id=900001)
+    added = await garmin.sync_activities(db_session, integ, user_id=uid)
     assert added == 1                      # 러닝만
     assert integ.auth_blob == "newblob"    # 갱신된 토큰 저장
     assert integ.last_sync_at is not None
 
     rows = (await db_session.execute(select(ExternalActivity).where(
         ExternalActivity.provider == "garmin",
-        ExternalActivity.user_id == 900001,
+        ExternalActivity.user_id == uid,
     ))).scalars().all()
     assert len(rows) == 1
     assert rows[0].cadence == 176
 
     # 재동기화 시 중복 추가 안 함
-    added2 = await garmin.sync_activities(db_session, integ, user_id=900001)
+    added2 = await garmin.sync_activities(db_session, integ, user_id=uid)
     assert added2 == 0
 
 
