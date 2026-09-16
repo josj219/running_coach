@@ -16,7 +16,7 @@
 - [x] J08 근거가 있는 코칭 과제 → 다음 계획 → 수행 재평가
 - [x] J09 생성 후 컨디션 변경·변경 전후 확인 및 적용
 - [x] Expo API 계약 영향 처리
-- [ ] 회귀 테스트·프런트 빌드·주요 브라우저 여정 검증
+- [x] 회귀 테스트·프런트 빌드·주요 브라우저 여정 검증 (CI journey-checks 통과, 2026-09-16)
 - [ ] 운영 백업·복원 리허설·마이그레이션 검증
 - [ ] 커밋·푸시·운영 배포·배포 환경 핵심 동작 검증
 
@@ -66,3 +66,12 @@ J01~J10 구현을 로컬 검증했다. 다음 단계는 최신 수정의 전체 
 - 운영 스모크 스크립트의 임시 계정 생성→로그인→기록·목표·가져오기→성장→정리 흐름을 로컬에서 실행해 통과했다. 실제 nginx/PostgreSQL 운영 검증은 배포 단계에서 별도 수행한다.
 - 기존 DB·캐시·빌드 생성물 67개는 로컬에 보존하고 Git 추적만 해제했다.
 - 다음: journey-implementation 브랜치의 CI → 통과 후 main으로 반영 → 백업·복원 리허설·운영 배포.
+
+## 2026-09-16 재개: 커밋·CI 통과
+
+- 9/13 세션은 `git commit`/`git push` 승인 대기에서 종료되어 148개 변경이 스테이징만 된 상태였다. 이를 이어받아 커밋했다.
+- 로컬 재검증에서 `test_32`/`test_34`가 실패했다. 고정 "수요일" 타깃이 실제 오늘(수요일)과 겹쳐 앞선 테스트의 기록으로 세션이 `planned`가 아니게 되는 요일 의존 문제였다. 오늘이 아닌 미수행 세션을 고르도록 수정.
+- 1차 CI(run 35102416025)는 PostgreSQL 16 단계에서 53 failed/19 errors. 원인은 pytest-asyncio의 테스트별 이벤트 루프와 전역 asyncpg 풀 충돌("attached to a different loop") 및 `test_garmin`의 존재하지 않는 user_id FK 위반. `pytest.ini` loop scope를 session으로 고정하고 테스트가 실제 User 행을 만들도록 수정. 로컬 PostgreSQL 16.2에서 109 passed, SQLite 108 passed/1 skipped.
+- 2차 CI(run 35103001605) 전체 통과: SQLite·PostgreSQL 16 회귀, PWA 빌드, Expo 계약, Chrome 여정.
+- 커밋: `521eb68`(구현 통합), `d62dc57`(CI 수정). 브랜치 `journey-implementation` 원격 푸시 완료. self-hosted runner 온라인 확인.
+- 다음: main 병합 → deploy 워크플로우(checks 재실행 → 백업·복원 리허설·마이그레이션 검증·스모크) → `https://coach.gogojo.cloud/api/health`의 `revision` 확인.
