@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
-from ..db import AppSettings, Goal, User, UserProfile, get_db
+from ..db import AppSettings, Goal, JourneyEvent, User, UserProfile, get_db
+from ..services.assessments import capture_assessment, serial
+from ..services.records import lock_user
 
 router = APIRouter(prefix="/api", tags=["profile"])
 
@@ -24,6 +26,7 @@ async def get_profile(user: User = Depends(get_current_user), db: AsyncSession =
         "vo2_max": p.vo2_max if p else None,
         "pb_10k": p.pb_10k if p else None, "pb_half": p.pb_half if p else None,
         "pb_full": p.pb_full if p else None,
+        **{k + "_date": str(getattr(p, k + "_date")) if p and getattr(p, k + "_date") else None for k in ("pb_10k", "pb_half", "pb_full")},
         "body_note": p.body_note if p else None, "avatar_url": p.avatar_url if p else None,
     }
 
@@ -40,6 +43,9 @@ class ProfilePatch(BaseModel):
     pb_10k: str | None = None
     pb_half: str | None = None
     pb_full: str | None = None
+    pb_10k_date: date | None = None
+    pb_half_date: date | None = None
+    pb_full_date: date | None = None
     body_note: str | None = None
     avatar_url: str | None = None
 
@@ -47,6 +53,9 @@ class ProfilePatch(BaseModel):
 @router.patch("/profile")
 async def patch_profile(body: ProfilePatch, user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
+    await lock_user(db, user.id)
+    await capture_assessment(db, user.id, reason="프로필 변경 전 당시 평가")
+    before = await get_profile(user, db)
     data = body.model_dump(exclude_unset=True)
     if "nickname" in data:
         user.nickname = data.pop("nickname")
@@ -57,6 +66,11 @@ async def patch_profile(body: ProfilePatch, user: User = Depends(get_current_use
     for k, v in data.items():
         setattr(p, k, v)
     db.add(p)
+    await db.flush()
+    after = await get_profile(user, db)
+    if before != after:
+        db.add(JourneyEvent(user_id=user.id, event_type="profile_changed", reason="프로필·PB 수정", before=before, after=after))
+        await capture_assessment(db, user.id, reason="프로필·PB 수정")
     await db.commit()
     return await get_profile(user, db)
 
@@ -70,7 +84,7 @@ async def get_goal(user: User = Depends(get_current_user), db: AsyncSession = De
         return {"race_type": None, "target_time": None, "target_date": None,
                 "dday": None, "description": None}
     return {
-        "race_type": g.race_type, "target_time": g.target_time,
+        "id": g.id, "race_type": g.race_type, "target_time": g.target_time,
         "target_date": g.target_date.isoformat() if g.target_date else None,
         "dday": (g.target_date - date.today()).days if g.target_date else None,
         "description": g.description,
@@ -87,16 +101,29 @@ class GoalPatch(BaseModel):
 @router.put("/goal")
 async def put_goal(body: GoalPatch, user: User = Depends(get_current_user),
                    db: AsyncSession = Depends(get_db)):
-    g = (await db.execute(select(Goal).where(
-        Goal.user_id == user.id, Goal.is_active == True,  # noqa: E712
-    ))).scalar_one_or_none() or Goal(user_id=user.id, race_type=body.race_type)
-    g.race_type = body.race_type
-    g.target_time = body.target_time
-    g.target_date = body.target_date
-    g.description = body.description
-    db.add(g)
+    await lock_user(db, user.id)
+    g = (await db.execute(select(Goal).where(Goal.user_id == user.id, Goal.is_active == True))).scalar_one_or_none()
+    values = body.model_dump()
+    if g and all(getattr(g, k) == v for k, v in values.items()):
+        return await get_goal(user, db)
+    await capture_assessment(db, user.id, reason="목표 변경 전 당시 평가")
+    before = serial({k: getattr(g, k) for k in values} | {"id": g.id}) if g else None
+    if g:
+        g.is_active = False
+    new = Goal(user_id=user.id, **values)
+    db.add(new)
+    await db.flush()
+    db.add(JourneyEvent(user_id=user.id, event_type="goal_changed", entity_id=new.id,
+        reason="새 목표 버전 시작", before=before, after=serial(values | {"id": new.id})))
+    await capture_assessment(db, user.id, reason="새 목표 버전 시작")
     await db.commit()
     return await get_goal(user, db)
+
+
+@router.get("/goals")
+async def goal_history(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    goals = (await db.execute(select(Goal).where(Goal.user_id == user.id).order_by(Goal.id.desc()))).scalars()
+    return {"items": [serial({k: getattr(g, k) for k in ("id", "race_type", "target_time", "target_date", "is_active", "created_at", "description")}) for g in goals]}
 
 
 @router.get("/settings")

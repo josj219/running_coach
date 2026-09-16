@@ -1,8 +1,9 @@
 // 러닝 코치 모바일 (Expo) — 커스텀 탭바 + 4화면
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, SafeAreaView, Text, View } from 'react-native';
+import { Pressable, SafeAreaView, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { api } from './src/api';
+import { CTA } from './src/ui';
 import { C } from './src/theme';
 import RecordSheet from './src/RecordSheet';
 import Today from './src/screens/Today';
@@ -18,6 +19,11 @@ const TABS = [
 ];
 
 export default function App() {
+  const [signedIn, setSignedIn] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [targetLog, setTargetLog] = useState(null);
+  const [recordVersion, setRecordVersion] = useState(0);
   const [tab, setTab] = useState('today');
   const [showRecord, setShowRecord] = useState(false);
   const [today, setToday] = useState(null);
@@ -30,7 +36,15 @@ export default function App() {
     catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, []);
-  useEffect(() => { refreshToday(); }, [refreshToday]);
+  useEffect(() => { if (signedIn) refreshToday(); }, [refreshToday, signedIn]);
+
+  if (!signedIn) return <SafeAreaView style={{ flex: 1, padding: 24, justifyContent: 'center', backgroundColor: C.bg }}>
+    <Text style={{ color: C.label, fontSize: 24 }}>러닝 코치 로그인</Text>
+    <TextInput accessibilityLabel="이메일" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="이메일" placeholderTextColor={C.label2} style={{ color: C.label, padding: 16 }} />
+    <TextInput accessibilityLabel="비밀번호" value={password} onChangeText={setPassword} secureTextEntry placeholder="비밀번호" placeholderTextColor={C.label2} style={{ color: C.label, padding: 16 }} />
+    {error && <Text style={{ color: C.label }}>{error}</Text>}
+    <CTA onPress={async () => { try { await api.login(email, password); setPassword(''); setSignedIn(true); } catch (e) { setError(e.message); } }}>로그인</CTA>
+  </SafeAreaView>;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
@@ -38,10 +52,11 @@ export default function App() {
       <View style={{ flex: 1 }}>
         {tab === 'today' && (
           <Today data={today} loading={loading} error={error} refresh={refreshToday}
-            onRecord={() => setShowRecord(true)} goWeek={() => setTab('week')} />
+            onRecord={() => { setTargetLog(null); setShowRecord(true); }}
+            onEdit={(log) => { setTargetLog(log); setShowRecord(true); }} goWeek={() => setTab('week')} />
         )}
         {tab === 'week' && <Week refreshToday={refreshToday} />}
-        {tab === 'history' && <History />}
+        {tab === 'history' && <History reloadKey={recordVersion} onEdit={(log) => { setTargetLog(log); setShowRecord(true); }} />}
         {tab === 'settings' && <Settings />}
       </View>
 
@@ -65,8 +80,8 @@ export default function App() {
         </View>
       </View>
 
-      <RecordSheet visible={showRecord} session={today?.session} todayDate={today?.today}
-        onClose={(saved) => { setShowRecord(false); if (saved) refreshToday(); }} />
+      <RecordSheet key={`${showRecord}-${targetLog?.id || "new"}`} visible={showRecord} session={targetLog ? null : today?.session} todayDate={targetLog?.log_date || today?.today} existingLog={targetLog}
+        onClose={(saved) => { setShowRecord(false); if (saved) { refreshToday(); setRecordVersion((v) => v + 1); } }} />
     </SafeAreaView>
   );
 }

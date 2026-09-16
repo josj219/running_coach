@@ -1,0 +1,35 @@
+{
+  "no_logs": {
+    "predicted": "4:52:15",
+    "readiness": {
+      "speed": 100,
+      "endurance": 0,
+      "consistency": null
+    },
+    "plotted_points": 12
+  },
+  "pb_edit_rewrites_past": {
+    "old_first_point": "4:52:15",
+    "new_first_point": "4:36:55",
+    "old_anchor": {
+      "date": "2026-06-01",
+      "predicted_sec": 17535
+    },
+    "new_anchor": {
+      "date": "2026-06-01",
+      "predicted_sec": 16615
+    }
+  },
+  "volume_reduction_scenario": {
+    "before": "3:23:55",
+    "after": "3:35:14",
+    "volume_before": 60.0,
+    "volume_after": 45.0,
+    "longest_before": 30,
+    "longest_after": 30
+  },
+  "nonrun_kind_not_filtered": {
+    "before": "4:52:15",
+    "with_other_40km_1h": "1:03:55"
+  }
+}

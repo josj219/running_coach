@@ -2,18 +2,22 @@
 
 import os
 import pathlib
+import tempfile
 
-_DB_PATH = pathlib.Path(__file__).parent / "_test_coach.db"
-if _DB_PATH.exists():
-    _DB_PATH.unlink()
+_TEST_DIR = tempfile.TemporaryDirectory(prefix="coach-api-tests-")
+_DB_PATH = pathlib.Path(_TEST_DIR.name) / "coach.db"
 
 # app 모듈 import 전에 환경 고정 (engine은 import 시 생성됨)
-os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_DB_PATH}"
+_PG_URL = os.environ.get("COACH_TEST_DATABASE_URL")
+if _PG_URL:
+    from sqlalchemy.engine import make_url
+    assert make_url(_PG_URL).database == "coach_test", "Refuse to run tests on a non-test PostgreSQL database"
+os.environ["DATABASE_URL"] = _PG_URL or f"sqlite+aiosqlite:///{_DB_PATH}"
 os.environ["COACH_MOCK"] = "1"
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["STRAVA_CLIENT_ID"] = ""
 os.environ["SEED_DEMO"] = "1"          # 로그인 가능한 데모 계정(고고조) 시드
-os.environ["JWT_SECRET"] = "test-secret"
+os.environ["JWT_SECRET"] = "test-secret-at-least-32-characters-long"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402

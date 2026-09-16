@@ -4,9 +4,12 @@
 """
 
 import json
-from datetime import date as date_t
+from datetime import date as date_t, datetime
+from typing import Literal
+from zoneinfo import ZoneInfo
+from ..config import get_settings
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +17,8 @@ from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from ..auth import get_current_user
-from ..db import PlanSession, User, WorkoutLog, WorkoutReview, get_db
+from ..db import ExternalActivity, JourneyEvent, PlanSession, User, WorkoutLog, WorkoutReview, get_db, utcnow
+from ..services.records import quality, lock_user, link_session, update_fulfillment, resolve_activity, validate_running_activity
 from ..prompts import WORKOUT_REVIEW_PROMPT
 from ..services import coach
 from ..services.context import (
@@ -43,6 +47,14 @@ class LogIn(BaseModel):
     image_url: str | None = None
     source: str = "manual"
     external_id: str | None = None
+    sport: Literal["running", "cycling", "strength", "other", "unknown"] | None = None
+    client_request_id: str | None = Field(None, max_length=100)
+    started_at: datetime | None = None
+    session_id: int | None = None
+    fulfillment: Literal["missed", "partial", "done", "substituted"] | None = None
+    comparison_tag: str | None = Field(None, max_length=160)
+    change_reason: str = Field("기록 정정", max_length=1000)
+    expected_revision: int | None = None
 
 
 class ImageAnalyzeIn(BaseModel):
@@ -55,7 +67,7 @@ def _review_dict(r: WorkoutReview | None) -> dict | None:
     if r is None:
         return None
     return {"recovery": r.recovery, "summary": r.summary, "strengths": r.strengths,
-            "improvements": r.improvements, "coach_comment": r.coach_comment}
+            "improvements": r.improvements, "coach_comment": r.coach_comment, "is_stale": r.is_stale}
 
 
 def _log_dict(log: WorkoutLog) -> dict:
@@ -67,16 +79,19 @@ def _log_dict(log: WorkoutLog) -> dict:
         "pain_part": log.pain_part, "pain_level": log.pain_level,
         "user_comment": log.user_comment, "source": log.source,
         "session_id": log.session_id, "review": _review_dict(log.review),
+        "sport": quality(log)["sport"], "quality": quality(log), "fulfillment": log.fulfillment,
+        "external_id": log.external_id, "started_at": log.started_at.isoformat() if log.started_at else None,
+        "comparison_tag": log.comparison_tag, "revision": log.revision, "updated_at": log.updated_at.isoformat() if log.updated_at else None,
     }
 
 
 @router.get("")
-async def list_logs(limit: int = 30, user: User = Depends(get_current_user),
+async def list_logs(limit: int = Query(30, ge=1, le=1000), user: User = Depends(get_current_user),
                     db: AsyncSession = Depends(get_db)):
     res = await db.execute(
         select(WorkoutLog).where(WorkoutLog.user_id == user.id)
         .options(selectinload(WorkoutLog.review))
-        .order_by(WorkoutLog.log_date.desc()).limit(limit)
+        .order_by(WorkoutLog.log_date.desc(), WorkoutLog.id.desc()).limit(limit)
     )
     return {"items": [_log_dict(l) for l in res.scalars().unique()]}
 
@@ -84,31 +99,79 @@ async def list_logs(limit: int = 30, user: User = Depends(get_current_user),
 @router.post("", status_code=201)
 async def create_log(body: LogIn, user: User = Depends(get_current_user),
                      db: AsyncSession = Depends(get_db)):
-    # 자연키(user_id, log_date) upsert — 같은 날 재저장은 덮어쓰기
-    existing = (await db.execute(select(WorkoutLog).where(
-        WorkoutLog.user_id == user.id, WorkoutLog.log_date == body.log_date,
-    ))).scalar_one_or_none()
-    log = existing or WorkoutLog(user_id=user.id, log_date=body.log_date, kind=body.kind)
-    for k, v in body.model_dump().items():
-        setattr(log, k, v)
-    if existing is None:
-        db.add(log)
-
-    # 같은 날짜의 계획 세션과 매칭 → 상태 갱신 (통증 4+ → partial)
-    plan = await get_current_plan(db, body.log_date, user.id)
-    session_status = None
-    if plan:
-        sess = (await db.execute(select(PlanSession).where(
-            PlanSession.plan_id == plan.id, PlanSession.session_date == body.log_date,
-        ))).scalar_one_or_none()
-        if sess:
-            sess.status = "partial" if body.pain_level >= 4 else "done"
-            log.session_id = sess.id
-            session_status = sess.status
+    await lock_user(db, user.id)
+    if body.client_request_id:
+        existing = (await db.execute(select(WorkoutLog).where(
+            WorkoutLog.user_id == user.id, WorkoutLog.client_request_id == body.client_request_id))).scalar_one_or_none()
+        if existing:
+            return {"id": existing.id, "created": False, "session_id": existing.session_id}
+    activity = None
+    if body.external_id:
+        activity = (await db.execute(select(ExternalActivity).where(
+            ExternalActivity.user_id == user.id, ExternalActivity.provider == body.source,
+            ExternalActivity.external_id == body.external_id))).scalar_one_or_none()
+        if not activity:
+            raise HTTPException(422, "소유한 외부 활동을 선택하세요.")
+        existing = await resolve_activity(db, user.id, activity)
+        if existing:
+            await db.commit()
+            return {"id": existing.id, "created": False, "session_id": existing.session_id}
+    values = body.model_dump(exclude={"session_id", "change_reason", "expected_revision"})
+    if activity:
+        validate_running_activity(activity)
+        if not activity.start_date:
+            raise HTTPException(422, "외부 활동의 시작 시각을 확인하세요.")
+        from ..services.records import _utc
+        values["log_date"] = _utc(activity.start_date).astimezone(ZoneInfo(get_settings().tz)).date()
+        values["started_at"] = activity.start_date
+        values["sport"] = "running"
+    log = WorkoutLog(user_id=user.id, **values)
+    db.add(log)
+    await link_session(db, user.id, log, body.session_id if "session_id" in body.model_fields_set else "auto")
+    await db.flush()
+    if activity:
+        activity.imported_log_id = log.id
+    status = await update_fulfillment(db, log.session_id)
+    db.add(JourneyEvent(user_id=user.id, event_type="record_added", entity_id=log.id,
+                       reason="새 운동 기록", after={"date": str(log.log_date), "distance_km": log.distance_km}))
     await db.commit()
-    await db.refresh(log)
-    return {"id": log.id, "session_id": log.session_id, "session_status": session_status,
-            "created": existing is None}
+    return {"id": log.id, "session_id": log.session_id, "session_status": status, "created": True,
+            "quality": quality(log)}
+
+
+@router.patch("/{log_id}")
+async def update_log(log_id: int, body: LogIn, user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    await lock_user(db, user.id)
+    log = (await db.execute(select(WorkoutLog).where(WorkoutLog.id == log_id,
+        WorkoutLog.user_id == user.id).options(selectinload(WorkoutLog.review)))).scalar_one_or_none()
+    if not log:
+        raise HTTPException(404, "기록이 없습니다.")
+    if body.expected_revision is not None and body.expected_revision != log.revision:
+        raise HTTPException(409, "기록이 변경됐습니다. 다시 열어 수정해 주세요.")
+    from ..services.assessments import capture_assessment
+    await capture_assessment(db, user.id, reason="기록 정정 전 당시 평가")
+    before = _log_dict(log)
+    old_session = log.session_id
+    # External identity belongs to the workout and cannot be replaced by an edit.
+    for key, value in body.model_dump(exclude_unset=True, exclude={"session_id", "source", "external_id", "client_request_id", "change_reason", "expected_revision"}).items():
+        setattr(log, key, value)
+    log.revision += 1
+    log.updated_at = utcnow()
+    if log.review:
+        log.review.is_stale = True
+    if "session_id" in body.model_fields_set or before["log_date"] != str(log.log_date):
+        await link_session(db, user.id, log, body.session_id if "session_id" in body.model_fields_set else "auto")
+    await db.flush()
+    await update_fulfillment(db, old_session)
+    status = await update_fulfillment(db, log.session_id)
+    db.add(JourneyEvent(user_id=user.id, event_type="record_corrected", entity_id=log.id,
+        reason=body.change_reason, before=before, after=_log_dict(log)))
+    await db.flush()
+    await capture_assessment(db, user.id, reason="기록 정정: " + body.change_reason)
+    await db.commit()
+    return {"id": log.id, "created": False, "session_id": log.session_id, "session_status": status,
+            "quality": quality(log), "revision": log.revision, "review_stale": bool(log.review)}
 
 
 @router.post("/analyze-image")
@@ -145,6 +208,10 @@ async def _build_review_message(db: AsyncSession, log: WorkoutLog, user_id: int)
 
 
 async def _save_review(db: AsyncSession, log: WorkoutLog, data: dict) -> WorkoutReview:
+    await lock_user(db, log.user_id)
+    revision = (await db.execute(select(WorkoutLog.revision).where(WorkoutLog.id == log.id))).scalar_one()
+    if revision != log.revision:
+        raise HTTPException(409, "리뷰 생성 중 기록이 변경됐습니다. 수정한 기록으로 다시 요청해 주세요.")
     review = (await db.execute(select(WorkoutReview).where(
         WorkoutReview.log_id == log.id,
     ))).scalar_one_or_none() or WorkoutReview(log_id=log.id)
@@ -154,6 +221,8 @@ async def _save_review(db: AsyncSession, log: WorkoutLog, data: dict) -> Workout
     review.improvements = data.get("improvements")
     review.recovery = data.get("recovery")
     review.raw_md = json.dumps(data, ensure_ascii=False)
+    review.is_stale = False
+    review.created_at = utcnow()
     db.add(review)
     await db.commit()
     await db.refresh(review)
@@ -170,6 +239,8 @@ async def create_review(log_id: int, request: Request, user: User = Depends(get_
         raise HTTPException(404, {"code": "NOT_FOUND", "message": "기록이 없습니다."})
 
     message = await _build_review_message(db, log, user.id)
+    # Release the read transaction while the model runs; save checks the input revision.
+    await db.commit()
     accept = request.headers.get("accept", "")
 
     if "text/event-stream" not in accept:
@@ -193,5 +264,7 @@ async def create_review(log_id: int, request: Request, user: User = Depends(get_
             yield {"event": "done", "data": json.dumps({"review_id": review.id, **data}, ensure_ascii=False)}
         except coach.CoachError as e:
             yield {"event": "error", "data": json.dumps({"code": "AI_UNAVAILABLE", "message": str(e)}, ensure_ascii=False)}
+        except HTTPException as e:
+            yield {"event": "error", "data": json.dumps({"code": "RECORD_CHANGED", "message": e.detail}, ensure_ascii=False)}
 
     return EventSourceResponse(event_gen())

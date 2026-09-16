@@ -40,15 +40,13 @@ async def get_current_plan(db: AsyncSession, d: date, user_id: int) -> WeeklyPla
 
 async def week_progress(db: AsyncSession, plan: WeeklyPlan | None, d: date, user_id: int) -> dict:
     """수행률 단일 정의: 분모 = 휴식 제외 세션 수, 분자 = done/partial."""
-    if plan is None:
-        return {"done": 0, "total": 0, "completion_rate": 0, "week_km": 0.0, "goal_km": None, "days_km": [0] * 7}
-    res = await db.execute(select(PlanSession).where(PlanSession.plan_id == plan.id))
-    sessions = list(res.scalars())
+    sessions = list((await db.execute(select(PlanSession).where(PlanSession.plan_id == plan.id))).scalars()) if plan else []
     workable = [s for s in sessions if not s.is_rest]
-    done = sum(1 for s in workable if s.status in ("done", "partial"))
+    done = sum(1 for s in workable if s.status == "done")
+    participated = sum(1 for s in workable if s.status in ("done", "partial", "substituted"))
     total = len(workable)
 
-    ws = plan.week_start
+    ws = plan.week_start if plan else week_start_of(d)
     res = await db.execute(
         select(WorkoutLog).where(
             WorkoutLog.user_id == user_id,
@@ -58,13 +56,17 @@ async def week_progress(db: AsyncSession, plan: WeeklyPlan | None, d: date, user
     )
     logs = list(res.scalars())
     days_km = [0.0] * 7
+    from .records import quality
     for log in logs:
+        if quality(log)["sport"] != "running":
+            continue
         days_km[(log.log_date - ws).days] += float(log.distance_km or 0)
     return {
-        "done": done, "total": total,
+        "done": done, "total": total, "participated": participated,
+        "participation_rate": round(participated / total * 100) if total else 0,
         "completion_rate": round(done / total * 100) if total else 0,
         "week_km": round(sum(days_km), 1),
-        "goal_km": plan.goal_km,
+        "goal_km": plan.goal_km if plan else None,
         "days_km": [round(k, 1) for k in days_km],
     }
 
@@ -130,6 +132,7 @@ async def render_recent_history(db: AsyncSession, user_id: int, days: int = 28) 
     lines = ["## 최근 훈련 기록 (최신순)"]
     for log in logs:
         parts = [f"{log.log_date} {KIND_LABELS.get(log.kind, log.kind)}",
+                 f"기록 #{log.id} · 종목 {log.sport or log.kind} · 수행 확인 {log.fulfillment or '자동 판정'}",
                  f"{log.distance_km}km" if log.distance_km else None,
                  f"페이스 {log.avg_pace}/km" if log.avg_pace else None,
                  f"심박 {log.avg_hr}" if log.avg_hr else None,

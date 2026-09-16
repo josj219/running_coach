@@ -2,12 +2,13 @@
 import React, { useEffect, useState } from 'react';
 import { api, genResult } from '../api.js';
 import { pendingGen, pollUntil, reconcileOnce } from '../recover.js';
-import { sessionSubtitle, wmeta } from '../workouts.js';
+import { fmtDelta, fmtHM, sessionSubtitle, wmeta } from '../workouts.js';
 import {
   Banner, Card, CTA, Expander, Hero, Icon, MetricRow, NavBarLarge,
   RecoveryBadge, SectionLabel, Spinner, WeekBars,
 } from '../components/Ui.jsx';
 import Markdown from '../components/Markdown.jsx';
+import { ConditionChange, fulfillmentLabel } from '../components/JourneyPanels.jsx';
 
 function TomorrowCard({ tomorrow }) {
   if (!tomorrow) return null;
@@ -116,6 +117,7 @@ function DailyCard({ data, session, planDate, recoverTick = 0, onGenerated }) {
       <SectionLabel trailing={<span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
         color: w.color, fontWeight: 600 }}><Icon name="Sparkles" size={13} color={w.color} /> AI 설계{data.is_adjusted ? ' · 조정됨' : ''}</span>}>
         오늘 훈련 상세</SectionLabel>
+      <ConditionChange onApplied={onGenerated} />
       {data.session_updated && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '0 2px 9px',
           fontSize: 13, fontWeight: 600, color: w.color }}>
@@ -163,7 +165,29 @@ function DailyCard({ data, session, planDate, recoverTick = 0, onGenerated }) {
   );
 }
 
-export default function Today({ data, loading, error, refresh, onRecord, goWeek, onPlan, recoverTick = 0 }) {
+// 홈 대시보드의 격차를 한 줄로 반복 노출 — 탭하면 홈으로
+function GapStrip({ dash, goHome }) {
+  const cur = dash?.current;
+  if (!dash?.goal?.target_sec || cur?.predicted_sec == null) return null;
+  const behind = cur.gap_sec > 0;
+  const color = behind ? 'var(--accent-red)' : 'var(--accent-green)';
+  return (
+    <button onClick={goHome} style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', margin: '0 0 12px',
+      padding: '9px 13px', borderRadius: 12, border: 'none', cursor: 'pointer', textAlign: 'left',
+      background: 'var(--bg-grouped-secondary)', boxShadow: 'var(--card-shadow)', fontSize: 13, fontWeight: 600,
+      color: 'var(--label-secondary)' }}>
+      <Icon name="Flag" size={13} color="var(--tint)" strokeWidth={2.4} />
+      <span>목표 {fmtHM(dash.goal.target_sec)}</span>
+      <span style={{ color: 'var(--label-tertiary)' }}>·</span>
+      <span>현재 기록 환산 <span style={{ color: 'var(--label-primary)', fontWeight: 700 }}>{fmtHM(cur.predicted_sec)}</span></span>
+      <span style={{ color, fontWeight: 700 }}>{behind ? `+${fmtDelta(cur.gap_sec)}` : '목표 이내 환산'}</span>
+      <Icon name="ChevronRight" size={15} color="var(--label-tertiary)" style={{ marginLeft: 'auto' }} />
+    </button>
+  );
+}
+
+export default function Today({ data, loading, error, refresh, onRecord, goWeek, onPlan, recoverTick = 0,
+                                dash, goHome, onAddRecord, onEditRecord }) {
   if (loading) return <div><NavBarLarge title="오늘" /><Spinner label="불러오는 중…" /></div>;
   if (error) return (
     <div><NavBarLarge title="오늘" />
@@ -210,13 +234,13 @@ export default function Today({ data, loading, error, refresh, onRecord, goWeek,
       </div>
     );
   } else if (state === 'REVIEWED' || state === 'POST_WORKOUT') {
-    const review = log?.review;
+    const review = log?.review?.is_stale ? null : log?.review;
     body = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Hero rgb={w?.rgb || '0,136,255'}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600, opacity: 0.95 }}>
-              <Icon name="CircleCheck" size={18} color="#fff" strokeWidth={2.3} /> 오늘 완료</span>
+              <Icon name="CircleCheck" size={18} color="#fff" strokeWidth={2.3} /> 기록 저장됨 · {fulfillmentLabel(session?.status)}</span>
             <span style={{ background: 'rgba(255,255,255,0.22)', borderRadius: 999, padding: '4px 10px',
               fontSize: 13, fontWeight: 600 }}>{w?.label}</span>
           </div>
@@ -339,7 +363,17 @@ export default function Today({ data, loading, error, refresh, onRecord, goWeek,
     <div className="anim-in">
       <NavBarLarge title="오늘" trailing={ddayLabel &&
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tint)' }}>{ddayLabel}</span>} />
-      <div style={{ padding: '4px 16px 0' }}>{body}</div>
+      <div style={{ padding: '4px 16px 0' }}>
+        <GapStrip dash={dash} goHome={goHome} />
+        {body}
+        <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
+          {(data.logs || []).map((l) => <Card key={l.id}><b>{wmeta(l.kind).label} · {l.distance_km}km</b>
+            {l.quality?.reason && <p>추정 제외: {l.quality.reason}</p>}
+            <CTA variant="ghost" onClick={() => onEditRecord(l)}>이 기록 수정</CTA></Card>)}
+          <CTA variant="gray" onClick={onAddRecord}>오늘 새 운동 추가</CTA>
+          <small>이번 주 참여율 {wp.participation_rate}% · 계획 이행률 {wp.completion_rate}%</small>
+        </div>
+      </div>
     </div>
   );
 }

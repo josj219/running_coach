@@ -1,23 +1,25 @@
-// 루트 — 인증 게이트(로그인/온보딩) + 탭 네비게이션 + 테마/강조색 + 오늘 데이터 공유
+// 루트 — 인증 게이트(로그인/온보딩) + 탭 네비게이션 + 테마/강조색 + 오늘/대시보드 데이터 공유
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, genResult, getToken } from './api.js';
 import { pendingGen, pollUntil, reconcileOnce } from './recover.js';
 import { isoWeekKey } from './workouts.js';
 import TabBar from './components/TabBar.jsx';
 import RecordSheet from './components/RecordSheet.jsx';
+import AddRunSheet from './components/AddRunSheet.jsx';
 import PlanSheet from './components/PlanSheet.jsx';
 import { Banner, Spinner } from './components/Ui.jsx';
 import Login from './Login.jsx';
 import Onboarding from './Onboarding.jsx';
+import Home from './tabs/Home.jsx';
 import Today from './tabs/Today.jsx';
 import Week from './tabs/Week.jsx';
-import History from './tabs/History.jsx';
 import Settings from './tabs/Settings.jsx';
 
+// 홈(대시보드)이 첫 화면 — 목표 격차를 매일 보게 한다. 옛 '기록' 탭은 홈 하단에 흡수.
 const TABS = [
+  { id: 'home', icon: 'House', label: '홈' },
   { id: 'today', icon: 'Footprints', label: '오늘' },
   { id: 'week', icon: 'CalendarDays', label: '이번 주' },
-  { id: 'history', icon: 'TrendingUp', label: '기록' },
   { id: 'settings', icon: 'Settings', label: '설정' },
 ];
 
@@ -26,14 +28,16 @@ export default function App() {
   const [authState, setAuthState] = useState('loading');
   const [user, setUser] = useState(null);
 
-  const [tab, setTab] = useState('today');
+  const [tab, setTab] = useState('home');
   const [theme, setThemeState] = useState(localStorage.getItem('theme') || 'dark');
   const [accent, setAccentState] = useState(localStorage.getItem('accent') || '#0088ff');
-  // 기록 시트 대상: null | { date, session, log } — 오늘/주간 탭 모두 임의 일자로 연다
+  // 기록 시트 대상: null | { date, session, log, prefill } — 오늘/주간 탭 모두 임의 일자로 연다.
+  // prefill: 계획에 없던 훈련을 연동 활동으로 열 때의 초기값(session 없음)
   const [recordTarget, setRecordTarget] = useState(null);
   // 기록 저장 시 증가 → 주간 탭이 의존성으로 받아 자동 리로드
   const [recordVersion, setRecordVersion] = useState(0);
   const [showPlan, setShowPlan] = useState(false);
+  const [showAddRun, setShowAddRun] = useState(false); // 계획에 없던 훈련 추가 시트 (홈 → 최근 훈련 ＋)
   // 끊긴 생성 복구: 복구 한 바퀴 끝날 때마다 증가(자식 카드가 스피너 해제 판단), 실패 시 안내 배너
   const [recoverTick, setRecoverTick] = useState(0);
   const [genNotice, setGenNotice] = useState(null);
@@ -41,6 +45,9 @@ export default function App() {
   const [today, setToday] = useState(null);
   const [todayLoading, setTodayLoading] = useState(true);
   const [todayError, setTodayError] = useState(null);
+  // 대시보드(목표 격차·궤적) — 오늘 데이터와 같이 갱신(기록 저장 시 예상 기록이 바뀐다)
+  const [dash, setDash] = useState(null);
+  const [dashError, setDashError] = useState(null);
 
   const setTheme = (v) => { setThemeState(v); localStorage.setItem('theme', v); };
   const setAccent = (v) => { setAccentState(v); localStorage.setItem('accent', v); };
@@ -71,13 +78,11 @@ export default function App() {
 
   const refreshToday = useCallback(async () => {
     setTodayError(null);
-    try {
-      setToday(await api.today());
-    } catch (e) {
-      setTodayError(e.message);
-    } finally {
-      setTodayLoading(false);
-    }
+    const [t, d] = await Promise.allSettled([api.today(), api.dashboard()]);
+    if (t.status === 'fulfilled') setToday(t.value); else setTodayError(t.reason?.message || '불러오지 못했어요.');
+    if (d.status === 'fulfilled') { setDash(d.value); setDashError(null); }
+    else setDashError(d.reason?.message || '불러오지 못했어요.');
+    setTodayLoading(false);
   }, []);
   // 앱 진입 상태일 때만 오늘 데이터 로드(미인증 시 401 방지)
   useEffect(() => { if (authState === 'app') refreshToday(); }, [authState, refreshToday]);
@@ -146,9 +151,17 @@ export default function App() {
         </div>
       )}
       <div className="scroll-area">
+        {tab === 'home' && (
+          <Home dash={dash} dashError={dashError} loading={todayLoading} refresh={refreshToday}
+            today={today} reloadKey={recordVersion}
+            goToday={() => setTab('today')} onPlan={() => setShowPlan(true)} goSettings={() => setTab('settings')}
+            onAddRun={() => setShowAddRun(true)} onEdit={(log) => setRecordTarget({ date: log.log_date, session: null, log })} />
+        )}
         {tab === 'today' && (
           <Today data={today} loading={todayLoading} error={todayError} refresh={refreshToday}
-            recoverTick={recoverTick}
+            recoverTick={recoverTick} dash={dash} goHome={() => setTab('home')}
+            onAddRecord={() => setRecordTarget({ date: today.today, session: today.session, log: null })}
+            onEditRecord={(log) => setRecordTarget({ date: today.today, session: today.session, log })}
             onRecord={() => setRecordTarget({ date: today.today, session: today.session, log: today.log })}
             goWeek={() => setTab('week')} onPlan={() => setShowPlan(true)} />
         )}
@@ -157,16 +170,25 @@ export default function App() {
             onRecord={(s) => setRecordTarget({ date: s.session_date, session: s, log: s.log })}
             onPlan={() => setShowPlan(true)} />
         )}
-        {tab === 'history' && <History />}
         {tab === 'settings' && (
-          <Settings theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
+          <Settings onChanged={refreshToday} theme={theme} setTheme={setTheme} accent={accent} setAccent={setAccent} />
         )}
       </div>
 
       <TabBar tabs={TABS} active={tab} onChange={setTab} />
 
+      {showAddRun && (
+        <AddRunSheet onClose={() => setShowAddRun(false)} onImported={() => { refreshToday(); setRecordVersion((v) => v + 1); }}
+          onPick={(date, activity, existing) => {
+            setShowAddRun(false);
+            // 연동 활동이면 그 값으로 프리필, 직접 입력이면 빈 폼(그날 기록이 있으면 수정으로)
+            setRecordTarget({ date, session: null, log: existing, prefill: activity || undefined });
+          }} />
+      )}
+
       {recordTarget && (
         <RecordSheet session={recordTarget.session} logDate={recordTarget.date} existingLog={recordTarget.log}
+          prefill={recordTarget.prefill}
           onClose={(saved) => {
             setRecordTarget(null);
             if (saved) { refreshToday(); setRecordVersion((v) => v + 1); }

@@ -3,11 +3,13 @@
 import Constants from 'expo-constants';
 
 const BASE = Constants.expoConfig?.extra?.apiBaseUrl || 'http://localhost:8000';
+let authToken = null;
+export const setToken = (value) => { authToken = value; };
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers },
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
@@ -20,6 +22,14 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  login: async (email, password) => {
+    const result = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    setToken(result.token); return result;
+  },
+  patchLog: (id, data) => request(`/api/workout-logs/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  pendingActivities: () => request('/api/integrations/activities'),
+  importActivities: (activity_ids) => request('/api/integrations/activities/import', { method: 'POST', body: JSON.stringify({ activity_ids }) }),
+  applyDaily: (id) => request(`/api/daily-plans/proposals/${id}/apply`, { method: 'POST' }),
   today: () => request('/api/today'),
   profile: () => request('/api/profile'),
   goal: () => request('/api/goal'),

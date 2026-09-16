@@ -72,6 +72,9 @@ class UserProfile(Base):
     pb_10k: Mapped[str | None] = mapped_column(String)    # "00:42:13"
     pb_half: Mapped[str | None] = mapped_column(String)
     pb_full: Mapped[str | None] = mapped_column(String)
+    pb_10k_date: Mapped[date | None] = mapped_column(Date)
+    pb_half_date: Mapped[date | None] = mapped_column(Date)
+    pb_full_date: Mapped[date | None] = mapped_column(Date)
     body_note: Mapped[str | None] = mapped_column(Text)
     avatar_url: Mapped[str | None] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -158,7 +161,8 @@ class DailyPlan(Base):
 
 class WorkoutLog(Base):
     __tablename__ = "workout_logs"
-    __table_args__ = (UniqueConstraint("user_id", "log_date"),)
+    __table_args__ = (UniqueConstraint("user_id", "client_request_id"),
+                      UniqueConstraint("user_id", "source", "external_id"))
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     session_id: Mapped[int | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
@@ -179,6 +183,13 @@ class WorkoutLog(Base):
     image_url: Mapped[str | None] = mapped_column(String)
     source: Mapped[str] = mapped_column(String, default="manual")  # manual|strava|garmin
     external_id: Mapped[str | None] = mapped_column(String)
+    sport: Mapped[str | None] = mapped_column(String)
+    client_request_id: Mapped[str | None] = mapped_column(String)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fulfillment: Mapped[str | None] = mapped_column(String)
+    comparison_tag: Mapped[str | None] = mapped_column(String)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     review: Mapped["WorkoutReview | None"] = relationship(back_populates="log", uselist=False, cascade="all, delete-orphan")
@@ -194,6 +205,7 @@ class WorkoutReview(Base):
     recovery: Mapped[str | None] = mapped_column(String)  # RECOVERY_LEVELS
     coach_comment: Mapped[str | None] = mapped_column(Text)
     raw_md: Mapped[str | None] = mapped_column(Text)
+    is_stale: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     log: Mapped[WorkoutLog] = relationship(back_populates="review")
@@ -246,12 +258,13 @@ class Integration(Base):
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     auth_blob: Mapped[str | None] = mapped_column(Text)  # Garmin 토큰 블롭(base64)
+    last_sync_error: Mapped[str | None] = mapped_column(Text)
 
 
 class ExternalActivity(Base):
     """Strava/Garmin에서 가져온 활동 캐시 — 기록 입력 자동 채움에 사용."""
     __tablename__ = "external_activities"
-    __table_args__ = (UniqueConstraint("provider", "external_id"),)
+    __table_args__ = (UniqueConstraint("user_id", "provider", "external_id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     provider: Mapped[str] = mapped_column(String)
@@ -270,6 +283,72 @@ class ExternalActivity(Base):
     raw: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class Assessment(Base):
+    """Append-only assessments: immutable result and exact input, tied to a goal version."""
+    __tablename__ = "assessments"
+    __table_args__ = (UniqueConstraint("user_id", "goal_id", "input_hash", "as_of"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id"))
+    as_of: Mapped[date] = mapped_column(Date)
+    input_hash: Mapped[str] = mapped_column(String)
+    calculation_version: Mapped[str] = mapped_column(String)
+    inputs: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class JourneyEvent(Base):
+    __tablename__ = "journey_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String)
+    entity_id: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Text)
+    before: Mapped[dict | None] = mapped_column(JSON)
+    after: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CoachingTask(Base):
+    __tablename__ = "coaching_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source_log_id: Mapped[int | None] = mapped_column(ForeignKey("workout_logs.id"))
+    source_plan_id: Mapped[int | None] = mapped_column(ForeignKey("weekly_plans.id"))
+    proposal: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, default="open")
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    assignments: Mapped[list] = mapped_column(JSON, default=list)
+    evaluations: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DailyProposal(Base):
+    __tablename__ = "daily_proposals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"))
+    plan_date: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text)
+    before: Mapped[dict] = mapped_column(JSON)
+    data: Mapped[dict] = mapped_column(JSON)
+    applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GoalCheckpoint(Base):
+    __tablename__ = "goal_checkpoints"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id"))
+    review_date: Mapped[date] = mapped_column(Date)
+    evidence_needed: Mapped[str] = mapped_column(Text)
+    decision: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 async def get_db():
     async with SessionLocal() as session:
         yield session
@@ -282,18 +361,53 @@ _ADDED_COLUMNS = [
     ("users", "onboarded", "BOOLEAN DEFAULT FALSE"),
     ("daily_plans", "session_updated", "BOOLEAN DEFAULT FALSE"),
     ("integrations", "auth_blob", "TEXT"),
+    ("integrations", "last_sync_error", "TEXT"),
+    ("user_profiles", "pb_10k_date", "DATE"),
+    ("user_profiles", "pb_half_date", "DATE"),
+    ("user_profiles", "pb_full_date", "DATE"),
+    ("workout_logs", "sport", "TEXT"),
+    ("workout_logs", "client_request_id", "TEXT"),
+    ("workout_logs", "started_at", "TIMESTAMP"),
+    ("workout_logs", "fulfillment", "TEXT"),
+    ("workout_logs", "comparison_tag", "TEXT"),
+    ("workout_logs", "revision", "INTEGER DEFAULT 1 NOT NULL"),
+    ("workout_logs", "updated_at", "TIMESTAMP"),
+    ("workout_reviews", "is_stale", "BOOLEAN DEFAULT FALSE NOT NULL"),
 ]
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        for table, col, typ in _ADDED_COLUMNS:
-            if engine.dialect.name == "sqlite":
-                rows = (await conn.exec_driver_sql(f"PRAGMA table_info({table})")).fetchall()
-                if any(r[1] == col for r in rows):
-                    continue
-                await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
-            else:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {typ}")
+    async with engine.connect() as conn:
+        sqlite = engine.dialect.name == "sqlite"
+        foreign_keys = 0
+        if sqlite:
+            foreign_keys = (await conn.exec_driver_sql("PRAGMA foreign_keys")).scalar_one()
+            await conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            await conn.commit()
+        try:
+            async with conn.begin():
+                # Explicit BEGIN also makes SQLite DDL transactional on legacy drivers.
+                if sqlite:
+                    await conn.exec_driver_sql("BEGIN")
+                await _initialize_schema(conn)
+        finally:
+            if sqlite:
+                await conn.exec_driver_sql(f"PRAGMA foreign_keys={foreign_keys}")
+                await conn.commit()
+
+
+async def _initialize_schema(conn):
+    await conn.run_sync(Base.metadata.create_all)
+    for table, col, typ in _ADDED_COLUMNS:
+        if engine.dialect.name == "postgresql" and typ == "TIMESTAMP":
+            typ = "TIMESTAMP WITH TIME ZONE"
+        if engine.dialect.name == "sqlite":
+            rows = (await conn.exec_driver_sql(f"PRAGMA table_info({table})")).fetchall()
+            if any(r[1] == col for r in rows):
+                continue
+            await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+        else:
+            await conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {typ}")
+    from .migrations import migrate_journey
+    await conn.run_sync(migrate_journey)

@@ -1,5 +1,5 @@
 // 기록 입력 모달 — Strava 자동 채움 + 최소 입력(거리·시간·몸상태)
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { api } from './api';
 import { autoPace, C, FEEL_OPTIONS, wmeta } from './theme';
@@ -24,15 +24,19 @@ function Label({ children }) {
     letterSpacing: 0.4, marginTop: 18, marginBottom: 8 }}>{children}</Text>;
 }
 
-export default function RecordSheet({ visible, session, todayDate, onClose }) {
-  const [form, setForm] = useState({ distance: '', minutes: '', seconds: '', avgHr: '', cadence: '', feel: 3, note: '' });
-  const [pain, setPain] = useState([]);
+export default function RecordSheet({ visible, session, todayDate, existingLog, onClose }) {
+  const [form, setForm] = useState({ distance: String(existingLog?.distance_km ?? ''), minutes: existingLog?.duration_sec ? String(Math.floor(existingLog.duration_sec / 60)) : '', seconds: existingLog?.duration_sec ? String(existingLog.duration_sec % 60) : '', avgHr: String(existingLog?.avg_hr ?? ''), cadence: String(existingLog?.cadence ?? ''), feel: existingLog?.feel || 3, note: existingLog?.user_comment || '' });
+  const [pain, setPain] = useState(existingLog?.pain_part?.split(', ') || []);
+  const [activity, setActivity] = useState(null);
+  const requestId = useRef(`mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const [sport, setSport] = useState(existingLog?.sport || 'running');
+  const [fulfillment, setFulfillment] = useState(existingLog?.fulfillment || null);
   const [phase, setPhase] = useState('form'); // form | saving | review
   const [review, setReview] = useState(null);
   const [error, setError] = useState(null);
   const [logId, setLogId] = useState(null);
   const [strava, setStrava] = useState(null); // null | 'loading' | items
-  const w = wmeta(session?.kind || 'easy');
+  const w = wmeta(existingLog?.kind || session?.kind || 'easy');
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   const durationSec = (parseInt(form.minutes, 10) || 0) * 60 + (parseInt(form.seconds, 10) || 0);
@@ -53,6 +57,7 @@ export default function RecordSheet({ visible, session, todayDate, onClose }) {
   };
 
   const pick = (a) => {
+    setActivity(a);
     setForm((p) => ({ ...p, distance: String(a.distance_km ?? ''),
       minutes: a.duration_sec ? String(Math.floor(a.duration_sec / 60)) : '',
       seconds: a.duration_sec ? String(a.duration_sec % 60) : '',
@@ -63,8 +68,11 @@ export default function RecordSheet({ visible, session, todayDate, onClose }) {
   const save = async () => {
     setPhase('saving'); setError(null);
     try {
-      const res = await api.saveLog({
-        log_date: todayDate, kind: session?.kind || 'easy',
+      const body = {
+        log_date: activity?.start_date ? new Date(activity.start_date).toLocaleDateString('sv-SE') : todayDate,
+        sport, fulfillment, client_request_id: requestId.current, expected_revision: existingLog?.revision,
+        ...(session && !activity ? { session_id: session.id } : {}),
+        kind: existingLog?.kind || session?.kind || 'easy',
         distance_km: parseFloat(form.distance) || 0,
         duration_sec: durationSec || null,
         avg_pace: pace || null,
@@ -72,8 +80,9 @@ export default function RecordSheet({ visible, session, todayDate, onClose }) {
         cadence: parseInt(form.cadence, 10) || null,
         feel: form.feel, fatigue_num: { 1: 9, 2: 7, 3: 3, 4: 1 }[form.feel],
         pain_part: pain.join(', ') || null, pain_level: pain.length ? 3 : 0,
-        user_comment: form.note || null, source: 'manual',
-      });
+        user_comment: form.note || null, source: activity?.provider || 'manual', external_id: activity?.external_id || null,
+      };
+      const res = existingLog ? await api.patchLog(existingLog.id, body) : await api.saveLog(body);
       setLogId(res.id);
       setPhase('review');
       try { setReview(await api.review(res.id)); }
@@ -94,7 +103,7 @@ export default function RecordSheet({ visible, session, todayDate, onClose }) {
             padding: 20, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: C.sep }}>
             <View>
               <Text style={{ color: C.label, fontSize: 20, fontWeight: '700' }}>
-                {phase === 'review' ? 'AI 코치 분석' : '훈련 기록'}</Text>
+                {phase === 'review' ? 'AI 코치 분석' : existingLog ? '이 기록 수정' : '새 운동 추가'}</Text>
               <Text style={{ color: C.label2, fontSize: 14, marginTop: 2 }}>{session?.title || '오늘 훈련'}</Text>
             </View>
             <Pressable onPress={() => onClose(phase === 'review')}
@@ -132,6 +141,10 @@ export default function RecordSheet({ visible, session, todayDate, onClose }) {
 
             {phase === 'form' && (
               <View>
+                <Label>종목 확인</Label>
+                <View style={{ flexDirection: 'row', gap: 8 }}>{[['running', '러닝'], ['cycling', '사이클'], ['strength', '근력'], ['unknown', '미확인']].map(([k, label]) => <Pressable key={k} onPress={() => setSport(k)}><Text style={{ color: sport === k ? C.tint : C.label2 }}>{label}</Text></Pressable>)}</View>
+                <Label>계획 수행 확인</Label>
+                <View style={{ flexDirection: 'row', gap: 8 }}>{[[null, '자동'], ['partial', '부분'], ['done', '계획대로'], ['substituted', '대체'], ['missed', '미수행']].map(([k, label]) => <Pressable key={label} onPress={() => setFulfillment(k)}><Text style={{ color: fulfillment === k ? C.tint : C.label2 }}>{label}</Text></Pressable>)}</View>
                 {/* Strava 가져오기 */}
                 {strava === null && (
                   <Pressable onPress={loadStrava} style={{ flexDirection: 'row', alignItems: 'center', gap: 12,

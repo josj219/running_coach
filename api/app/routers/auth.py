@@ -200,6 +200,8 @@ class OnboardIn(BaseModel):
 
 @router.post("/onboard")
 async def onboard(body: OnboardIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if user.onboarded:
+        raise HTTPException(409, "이미 시작한 계정입니다. 설정에서 프로필과 목표를 변경하세요.")
     uid = user.id
     user.nickname = body.nickname.strip() or user.nickname
 

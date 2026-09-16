@@ -102,7 +102,7 @@ async def sync_activities(db: AsyncSession, integ: Integration, user_id: int, li
             continue
         ext_id = str(a["id"])
         existing = (await db.execute(select(ExternalActivity).where(
-            ExternalActivity.provider == "strava", ExternalActivity.external_id == ext_id,
+            ExternalActivity.user_id == user_id, ExternalActivity.provider == "strava", ExternalActivity.external_id == ext_id,
         ))).scalar_one_or_none()
         if existing:
             continue
@@ -125,6 +125,7 @@ async def sync_activities(db: AsyncSession, integ: Integration, user_id: int, li
                                        "distance", "moving_time", "average_speed")},
         ))
         added += 1
+    integ.last_sync_error = None
     integ.last_sync_at = datetime.now(timezone.utc)
     await db.commit()
     return added

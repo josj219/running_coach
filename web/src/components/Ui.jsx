@@ -3,18 +3,18 @@ import React, { useEffect, useState } from 'react';
 import {
   Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Camera, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
-  CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
-  KeyRound, LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
-  StretchHorizontal, Target, Trash2, TrendingUp, Trophy, Watch, Wind, X, Zap,
+  CircleDot, CircleX, Compass, Droplet, Dumbbell, Flag, Flame, Footprints, Gauge, House, Info,
+  KeyRound, LoaderCircle, LogOut, Minus, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
+  StretchHorizontal, Target, Timer, Trash2, TrendingDown, TrendingUp, Trophy, Watch, Wind, X, Zap,
 } from 'lucide-react';
 import { WEEK_DAYS, wmeta } from '../workouts.js';
 
 const ICONS = {
   Activity, ArrowRight, Bed, Calendar, CalendarClock, CalendarDays, Camera, Check,
   ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck,
-  CircleDot, CircleX, Compass, Droplet, Dumbbell, Flame, Footprints, Info,
-  KeyRound, LoaderCircle, LogOut, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
-  StretchHorizontal, Target, Trash2, TrendingUp, Trophy, Watch, Wind, X, Zap,
+  CircleDot, CircleX, Compass, Droplet, Dumbbell, Flag, Flame, Footprints, Gauge, House, Info,
+  KeyRound, LoaderCircle, LogOut, Minus, Mountain, Pencil, Plus, Settings, Shield, Sparkles,
+  StretchHorizontal, Target, Timer, Trash2, TrendingDown, TrendingUp, Trophy, Watch, Wind, X, Zap,
 };
 
 // 로그인/재설정 화면 공용 텍스트 입력 스타일

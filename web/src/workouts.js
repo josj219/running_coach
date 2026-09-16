@@ -81,3 +81,28 @@ export function sessionSubtitle(s) {
   if (s.target_pace) parts.push(s.target_pace);
   return parts.join(' · ');
 }
+
+// 초 → "4:31:12" (1시간 미만은 "44:00") — 예상 기록·목표 기록 표기
+export function fmtHMS(sec) {
+  if (sec == null) return null;
+  const t = Math.round(sec);
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// 초 → "3:30" (시:분) — 그래프 축·한 줄 요약용 축약
+export function fmtHM(sec) {
+  if (sec == null) return null;
+  const t = Math.round(sec);
+  return `${Math.floor(t / 3600)}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
+}
+
+// 초 차이 → "1시간 1분" / "13분 20초" / "45초" (부호 없음 — 문맥에서 방향을 말한다)
+export function fmtDelta(sec) {
+  if (sec == null) return null;
+  const t = Math.round(Math.abs(sec));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  if (h) return `${h}시간${m ? ` ${m}분` : ''}`;
+  if (m) return `${m}분${s ? ` ${s}초` : ''}`;
+  return `${s}초`;
+}

@@ -1,6 +1,6 @@
 /* 러닝 코치 PWA 서비스 워커 — 셸 precache + 정적 자산 캐시.
    /api/* 는 절대 캐시하지 않는다(항상 네트워크). */
-const CACHE = 'coach-shell-v1';
+const CACHE = 'coach-shell-journey-1';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

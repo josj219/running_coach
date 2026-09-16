@@ -1,6 +1,7 @@
 """고고조 AI 러닝 코치 v2 — FastAPI 엔트리포인트."""
 
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 from .db import SessionLocal, init_db
 from .routers import (
-    auth, availability, daily_plans, integrations, profile, today, weeks, workout_logs,
+    auth, availability, dashboard, daily_plans, integrations, journey, profile, today, weeks,
+    workout_logs,
 )
 from .seed import seed
 
@@ -41,14 +43,17 @@ async def unhandled(request: Request, exc: Exception):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "revision": os.environ.get("APP_REVISION", "local")}
 
 
 app.include_router(auth.router)
 app.include_router(profile.router)
 app.include_router(availability.router)
 app.include_router(today.router)
+app.include_router(dashboard.router)
 app.include_router(weeks.router)
 app.include_router(daily_plans.router)
 app.include_router(workout_logs.router)
 app.include_router(integrations.router)
+
+app.include_router(journey.router)

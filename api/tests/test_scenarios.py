@@ -70,12 +70,14 @@ async def test_06_save_log(client):
     assert body["session_id"] is not None  # 오늘 세션과 매칭됨
 
 
-async def test_07_save_log_idempotent_upsert(client):
-    """같은 날 재저장 → 중복 행 없이 덮어쓰기 (자연키 upsert)."""
-    r = await client.post("/api/workout-logs", json={
+async def test_07_edit_log_by_id(client):
+    """명시적 ID 수정 → 대상 기록만 변경."""
+    logs = (await client.get("/api/workout-logs")).json()["items"]
+    target = next(l for l in logs if l["log_date"] == today_str())
+    r = await client.patch(f"/api/workout-logs/{target['id']}", json={
         "log_date": today_str(), "kind": "easy", "distance_km": 5.5, "feel": 4,
     })
-    assert r.status_code == 201
+    assert r.status_code == 200
     assert r.json()["created"] is False
     logs = (await client.get("/api/workout-logs")).json()["items"]
     same_day = [l for l in logs if l["log_date"] == today_str()]
@@ -117,7 +119,7 @@ async def test_09_week_progress_updated(client):
     # 오늘 세션이 휴식이 아니면 done 1
     today_sessions = [s for s in body["sessions"] if s["session_date"] == today_str()]
     if today_sessions and not today_sessions[0]["is_rest"]:
-        assert body["progress"]["done"] == 1
+        assert body["progress"]["participated"] == 1
         assert today_sessions[0]["status"] == "done"
 
 
@@ -279,15 +281,13 @@ async def test_18_weekly_evaluation(client):
     assert ev["total_km"] >= 5.5  # 앱 집계 숫자 (AI 아님)
 
 
-async def test_19_daily_plan_card(client):
+async def test_19_completed_daily_plan_is_preserved(client):
+    before = (await client.get("/api/today")).json()
     r = await client.post("/api/daily-plans", json={"condition_note": "수면 6시간"})
-    if r.status_code == 404:  # 오늘 세션 없는 요일이면 스킵
-        return
-    assert r.status_code == 201
-    sections = r.json()["sections"]
-    assert sections["warmup"] and sections["main"] and sections["cooldown"]
-    today = (await client.get("/api/today")).json()
-    assert today["daily_plan"] is not None
+    assert r.status_code == 409
+    after = (await client.get("/api/today")).json()
+    assert after["session"] == before["session"]
+    assert after["logs"] == before["logs"]
 
 
 # ── 통계 · 설정 · 연동 ────────────────────────────────────────────────────
@@ -415,6 +415,13 @@ async def test_31_daily_plan_includes_availability(client, monkeypatch):
         return coach.MOCK_RESPONSES["daily"]
 
     monkeypatch.setattr("app.routers.daily_plans.coach.generate", fake_generate)
+    wk = (await client.get("/api/weeks/current")).json()
+    target = next(date.fromisoformat(s["session_date"]) for s in wk["sessions"] if s["status"] == "planned")
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return target
+    monkeypatch.setattr("app.routers.daily_plans.date", FakeDate)
     r = await client.post("/api/daily-plans", json={"condition_note": "컨디션 좋음"})
     if r.status_code == 404:  # 오늘 세션 없는 요일이면 스킵
         return
@@ -422,15 +429,27 @@ async def test_31_daily_plan_includes_availability(client, monkeypatch):
     assert "정기 훈련 가능 시간(기본 시간표)" in captured["message"]
 
 
+def _planned_target(week: dict) -> "date | None":
+    """이번 주에서 실제 오늘이 아니고 아직 미수행(planned)·비휴식인 세션 날짜.
+    고정 요일(수요일)을 쓰면 그 요일이 실제 오늘과 겹치는 날 앞선 테스트의 기록 때문에 409가 난다."""
+    real_today = date.today()
+    for s in sorted(week["sessions"], key=lambda x: x["session_date"]):
+        d = date.fromisoformat(s["session_date"])
+        if d != real_today and s.get("status", "planned") == "planned" and not s.get("is_rest"):
+            return d
+    return None
+
 async def test_32_daily_adjustment_propagates_to_weekly_session(client, monkeypatch):
     """당일 카드가 컨디션 반영으로 조정되면(adjusted+session) 그 변경이
     이번 주 계획의 해당 PlanSession에도 반영된다 — 오늘 탭→주간 탭 동기화."""
     # 이번 주 계획 재생성 — 평일(미수행) 세션을 planned 상태로 보장
-    wk = (await client.post("/api/weekly-plans", json={})).json()
-    week_start = date.fromisoformat(wk["week_start"])
-    target = week_start + timedelta(days=2)  # 수요일 — 미수행 세션을 타깃
+    await client.post("/api/weekly-plans", json={})
+    wk = (await client.get("/api/weeks/current")).json()
+    target = _planned_target(wk)  # 실제 오늘이 아닌 미수행 세션을 타깃
+    if target is None:
+        return  # 이번 주에 미수행 세션이 없으면 이 시나리오 아님 → 스킵
 
-    # daily 엔드포인트의 '오늘'을 수요일로 고정 (공유 DB에서 오늘=월은 done 상태)
+    # daily 엔드포인트의 '오늘'을 타깃 날짜로 고정 (실제 오늘 세션은 앞선 테스트 기록으로 done일 수 있음)
     class FakeDate(date):
         @classmethod
         def today(cls):
@@ -455,6 +474,8 @@ async def test_32_daily_adjustment_propagates_to_weekly_session(client, monkeypa
 
     r = await client.post("/api/daily-plans", json={"condition_note": "오늘 뛰고 싶어요"})
     assert r.status_code == 201
+    if r.json().get("requires_apply"):
+        r = await client.post(f"/api/daily-plans/proposals/{r.json()['proposal_id']}/apply")
     assert r.json()["is_adjusted"] is True
 
     # 이번 주 탭(주간 계획)에 반영됐는지 확인
@@ -484,7 +505,7 @@ async def test_33_daily_adjustment_preserves_completed_session(client, monkeypat
 
     monkeypatch.setattr("app.routers.daily_plans.coach.generate", fake_generate)
     r = await client.post("/api/daily-plans", json={"condition_note": "뛰고 싶어요"})
-    assert r.status_code == 201
+    assert r.status_code == 409
 
     after = (await client.get("/api/today")).json()["session"]
     assert after["kind"] == original_kind  # 완료 세션은 보존
@@ -493,8 +514,11 @@ async def test_33_daily_adjustment_preserves_completed_session(client, monkeypat
 
 async def test_34_today_exposes_session_updated_flag(client, monkeypatch):
     """주간 반영이 일어난 날은 /api/today가 session_updated=True를 내려준다 — 오늘 탭 확인 문구용."""
-    wk = (await client.post("/api/weekly-plans", json={})).json()
-    target = date.fromisoformat(wk["week_start"]) + timedelta(days=2)  # 수요일
+    await client.post("/api/weekly-plans", json={})
+    wk = (await client.get("/api/weeks/current")).json()
+    target = _planned_target(wk)  # 실제 오늘이 아닌 미수행 세션
+    if target is None:
+        return
 
     class FakeDate(date):
         @classmethod
@@ -514,6 +538,11 @@ async def test_34_today_exposes_session_updated_flag(client, monkeypatch):
 
     monkeypatch.setattr("app.routers.daily_plans.coach.generate", fake_generate)
 
-    await client.post("/api/daily-plans", json={"condition_note": "오늘 뛰고 싶어요"})
+    r = await client.post("/api/daily-plans", json={"condition_note": "오늘 뛰고 싶어요"})
+    assert r.status_code == 201, r.text
+    if r.json().get("requires_apply"):  # 이미 당일 카드가 있으면 제안→적용
+        r = await client.post(f"/api/daily-plans/proposals/{r.json()['proposal_id']}/apply")
+        assert r.status_code == 200, r.text
     today = (await client.get("/api/today")).json()
+    assert today["daily_plan"] is not None
     assert today["daily_plan"]["session_updated"] is True

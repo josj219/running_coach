@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from ..auth import get_current_user
 from ..db import DailyPlan, Goal, PlanSession, User, WorkoutLog, get_db
+from .workout_logs import _log_dict
 from ..services.context import WEEKDAYS_KO, get_current_plan, week_progress
 
 router = APIRouter(prefix="/api", tags=["today"])
@@ -40,9 +41,10 @@ async def get_today(user: User = Depends(get_current_user), db: AsyncSession = D
         # 내일 예고 — 다음 주 계획이 없으면 None
         tomorrow_session = by_date.get(today + timedelta(days=1))
 
-    log = (await db.execute(select(WorkoutLog).where(
+    logs = list((await db.execute(select(WorkoutLog).where(
         WorkoutLog.user_id == user.id, WorkoutLog.log_date == today,
-    ).options(selectinload(WorkoutLog.review)))).scalar_one_or_none()
+    ).options(selectinload(WorkoutLog.review)).order_by(WorkoutLog.id.desc()))).scalars())
+    log = logs[0] if logs else None
 
     daily = (await db.execute(select(DailyPlan).where(
         DailyPlan.user_id == user.id, DailyPlan.plan_date == today,
@@ -52,7 +54,7 @@ async def get_today(user: User = Depends(get_current_user), db: AsyncSession = D
     if plan is None:
         state = "NO_PLAN"          # S0
     elif log is not None:
-        state = "REVIEWED" if log.review else "POST_WORKOUT"  # S3 / S2
+        state = "REVIEWED" if log.review and not log.review.is_stale else "POST_WORKOUT"  # S3 / S2
     elif session is None:
         # 계획 주이지만 오늘 세션 없음 → 주말 지난 일요일 이후면 주간 종료로 취급
         state = "REST_DAY"
@@ -80,19 +82,9 @@ async def get_today(user: User = Depends(get_current_user), db: AsyncSession = D
         "session": _session_dict(session),
         "tomorrow": _session_dict(tomorrow_session),
         "log_id": log.id if log else None,
-        "log": None if log is None else {
-            "id": log.id,
-            "distance_km": log.distance_km, "duration_sec": log.duration_sec,
-            "avg_pace": log.avg_pace, "avg_hr": log.avg_hr, "max_hr": log.max_hr,
-            "cadence": log.cadence, "feel": log.feel,
-            "pain_part": log.pain_part, "pain_level": log.pain_level,
-            "user_comment": log.user_comment, "source": log.source,
-            "review": None if not log.review else {
-                "recovery": log.review.recovery, "coach_comment": log.review.coach_comment,
-                "summary": log.review.summary,
-                "strengths": log.review.strengths, "improvements": log.review.improvements,
-            },
-        },
+        "log": _log_dict(log) if log else None,
+        "logs": [_log_dict(l) for l in logs],
+        "day_km": sum(l.distance_km for l in logs if l.sport == "running" or (not l.sport and l.kind in {"easy", "tempo", "interval", "long", "race"})),
         "daily_plan": None if daily is None else {
             "sections": daily.sections, "is_adjusted": daily.is_adjusted,
             "session_updated": daily.session_updated,

@@ -166,3 +166,8 @@ SMTP 미설정 상태에서 앱의 재설정을 시도하면 메일은 안 가�
 - **복구**: `gunzip -c <백업>.sql.gz | docker compose -f docker-compose.prod.yml exec -T db psql -U coach -d coach`
 - **Strava 켜기**: Strava 앱 등록 시 Authorization Callback Domain에 `coach.내도메인` 등록 → Secrets에 키 채우고 재배포
 - **비용 감각**: Lightsail 2GB ≈ $12/월, 도메인 ≈ 연 1~2만원, Cloudflare/Anthropic은 사용량 기반
+
+
+## 2026-09 사용자 여정 배포
+
+현재 자동화는 배포 전 SQLite/PostgreSQL·PWA·Expo 계약·브라우저 검사를 통과하고, 백업 복원본과 실제 DB에서 마이그레이션을 검증합니다. 절차와 실패 시 복구는 [사용자 여정 운영 문서](JOURNEY_OPERATIONS.md)를 따릅니다.

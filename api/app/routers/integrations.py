@@ -10,7 +10,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from ..auth import _decode_user_id, create_token, get_current_user
 from ..config import get_settings
 from ..db import ExternalActivity, Integration, User, get_db
 from ..services import garmin, strava
+from ..services.records import import_activity, lock_user, resolve_activity
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
@@ -39,12 +40,14 @@ async def list_integrations(user: User = Depends(get_current_user), db: AsyncSes
             "connected": st is not None and st.access_token is not None,
             "athlete_name": st.athlete_name if st else None,
             "last_sync_at": st.last_sync_at.isoformat() if st and st.last_sync_at else None,
+            "last_sync_error": st.last_sync_error if st else None,
         },
         "garmin": {
             "available": True,
             "connected": ga is not None and ga.auth_blob is not None,
             "athlete_name": ga.athlete_name if ga else None,
             "last_sync_at": ga.last_sync_at.isoformat() if ga and ga.last_sync_at else None,
+            "last_sync_error": ga.last_sync_error if ga else None,
             "note": "가민 커넥트 이메일/비밀번호로 직접 연결합니다. 비밀번호는 저장하지 않아요.",
         },
     }
@@ -98,6 +101,8 @@ async def strava_sync(user: User = Depends(get_current_user), db: AsyncSession =
     try:
         added = await strava.sync_activities(db, integ, user.id)
     except strava.StravaError as e:
+        integ.last_sync_error = "동기화 실패 — 연결 상태를 확인하고 다시 시도하세요."
+        await db.commit()
         raise HTTPException(502, {"code": "INTEGRATION_ERROR", "message": str(e)})
     return {"added": added}
 
@@ -111,6 +116,7 @@ def _activity_dict(a: ExternalActivity) -> dict:
         "avg_pace": a.avg_pace, "avg_hr": a.avg_hr, "max_hr": a.max_hr,
         "cadence": a.cadence, "elevation_m": a.elevation_m,
         "imported": a.imported_log_id is not None,
+        "imported_log_id": a.imported_log_id,
     }
 
 
@@ -123,7 +129,8 @@ async def strava_activities(limit: int = 5, user: User = Depends(get_current_use
         try:
             await strava.sync_activities(db, integ, user.id)
         except strava.StravaError:
-            pass  # 캐시로 응답
+            integ.last_sync_error = "동기화 실패 — 저장된 활동 목록입니다."
+            await db.commit()
     res = await db.execute(select(ExternalActivity).where(
         ExternalActivity.user_id == user.id, ExternalActivity.provider == "strava",
     ).order_by(ExternalActivity.start_date.desc()).limit(limit))
@@ -194,6 +201,8 @@ async def garmin_sync(user: User = Depends(get_current_user), db: AsyncSession =
     try:
         added = await garmin.sync_activities(db, integ, user.id)
     except garmin.GarminError as e:
+        integ.last_sync_error = "동기화 실패 — 연결 상태를 확인하고 다시 시도하세요."
+        await db.commit()
         raise HTTPException(502, {"code": "INTEGRATION_ERROR", "message": str(e)})
     return {"added": added}
 
@@ -206,7 +215,8 @@ async def garmin_activities(limit: int = 5, user: User = Depends(get_current_use
         try:
             await garmin.sync_activities(db, integ, user.id)
         except garmin.GarminError:
-            pass  # 캐시로 응답
+            integ.last_sync_error = "동기화 실패 — 저장된 활동 목록입니다."
+            await db.commit()
     res = await db.execute(select(ExternalActivity).where(
         ExternalActivity.user_id == user.id, ExternalActivity.provider == "garmin",
     ).order_by(ExternalActivity.start_date.desc()).limit(limit))
@@ -220,3 +230,35 @@ async def garmin_disconnect(user: User = Depends(get_current_user), db: AsyncSes
         await db.delete(integ)
         await db.commit()
     return {"disconnected": True}
+
+
+@router.get("/activities")
+async def pending_activities(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await lock_user(db, user.id)
+    activities = list((await db.execute(select(ExternalActivity).where(
+        ExternalActivity.user_id == user.id).order_by(ExternalActivity.start_date.desc()))).scalars())
+    for a in activities:
+        await resolve_activity(db, user.id, a)
+    await db.commit()
+    pending = [a for a in activities if not a.imported_log_id]
+    return {"items": [_activity_dict(a) for a in pending], "pending_count": len(pending),
+            "integrations": await list_integrations(user, db)}
+
+
+class ImportIn(BaseModel):
+    activity_ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/activities/import")
+async def import_activities(body: ImportIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await lock_user(db, user.id)
+    activities = list((await db.execute(select(ExternalActivity).where(
+        ExternalActivity.user_id == user.id, ExternalActivity.id.in_(set(body.activity_ids))).order_by(ExternalActivity.id))).scalars())
+    if len(activities) != len(set(body.activity_ids)):
+        raise HTTPException(404, "선택한 활동을 찾을 수 없습니다.")
+    items = []
+    for activity in activities:
+        log, created = await import_activity(db, user.id, activity)
+        items.append({"activity_id": activity.id, "log_id": log.id, "created": created})
+    await db.commit()
+    return {"items": items, "created_count": sum(i["created"] for i in items)}

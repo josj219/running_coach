@@ -9,7 +9,7 @@ import json
 import os
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import hash_password
@@ -44,6 +44,8 @@ async def seed(db: AsyncSession) -> None:
         db.add(User(id=USER_ID, email=DEMO_EMAIL, nickname=nickname,
                     password_hash=hash_password(DEMO_PASSWORD), onboarded=True))
         await db.flush()
+        if db.bind.dialect.name == "postgresql":
+            await db.execute(text("SELECT setval(pg_get_serial_sequence('users','id'), (SELECT max(id) FROM users))"))
         # 훈련 가능 시간은 availability_slots로 분리 — body_note에는 체형·부상 정보만
         db.add(UserProfile(
             user_id=USER_ID, height_cm=178, weight_kg=80, age=35, career_years=2,

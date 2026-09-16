@@ -17,7 +17,10 @@ concurrency:
   cancel-in-progress: false   # 배포 중첩 방지(앞 배포 끝나고 진행)
 
 jobs:
+  checks:
+    uses: ./.github/workflows/journey-checks.yml
   deploy:
+    needs: checks
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
@@ -42,11 +45,12 @@ jobs:
           SMTP_USER=${{ secrets.SMTP_USER }}
           SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM=${{ secrets.SMTP_FROM }}
+          APP_REVISION=${{ github.sha }}
           TZ=Asia/Seoul
           EOF
 
-      - name: Build & deploy
-        run: docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+      - name: Backup, restore rehearsal, migrate, deploy and verify
+        run: bash ops/deploy.sh
 
       # api 컨테이너 안에서 헬스체크(포트를 host에 공개하지 않으므로 exec로 확인)
       - name: Health check
@@ -78,7 +82,7 @@ jobs:
           echo "===== all docker containers (strays?) ====="
           docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
           echo "===== host-level cloudflared (2nd connector on same tunnel?) ====="
-          pgrep -a cloudflared || echo "no host cloudflared process"
+          pgrep -x cloudflared || echo "no host cloudflared process"
           systemctl list-units --type=service --all 2>/dev/null | grep -i cloudflar || echo "no cloudflared systemd unit"
           ls -la /etc/cloudflared 2>/dev/null || echo "no /etc/cloudflared"
           echo "===== api -> web:80 (origin that cloudflared hits) ====="

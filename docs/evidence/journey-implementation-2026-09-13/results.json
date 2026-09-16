@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "J01 PB-only home: data status, no fabricated historical line",
+    "J09 existing daily card: condition preview and explicit apply",
+    "J06 1km recorded as partial; J08 select review coaching task",
+    "J03 same-day workouts stay separate; editing preserves IDs and other record",
+    "J06 weekly participation vs fulfillment; weekly evaluation rendered",
+    "J02 confirmed import: cross-provider duplicate counted once, distinct second run preserved",
+    "J04/J10 historical assessments and month comparison, insufficient sample state",
+    "mobile and desktop render without page errors or horizontal overflow"
+  ],
+  "errors": [],
+  "completed_at": "2026-09-13T02:47:56.577Z",
+  "environment": "local COACH_MOCK SQLite"
+}

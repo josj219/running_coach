@@ -25,7 +25,7 @@ function Tomorrow({ tomorrow }) {
   );
 }
 
-export default function Today({ data, loading, error, refresh, onRecord, goWeek }) {
+export default function Today({ data, loading, error, refresh, onRecord, goWeek, onEdit }) {
   if (loading) return <Loading label="불러오는 중…" />;
   if (error) return <View style={{ padding: 16 }}><Banner tone="error">{error}</Banner>
     <View style={{ marginTop: 12 }}><CTA variant="gray" onPress={refresh}>재시도</CTA></View></View>;
@@ -40,6 +40,9 @@ export default function Today({ data, loading, error, refresh, onRecord, goWeek 
         {dday != null && <Text style={{ color: C.tint, fontSize: 13, fontWeight: '700' }}>D-{dday}</Text>}
       </View>
 
+      {(data.logs || []).map((l) => <Card key={l.id}><Text style={{ color: C.label }}>{l.distance_km}km · {l.quality?.reason || '러닝 기록'}</Text><CTA variant="gray" onPress={() => onEdit(l)}>이 기록 수정</CTA></Card>)}
+      <CTA variant="gray" onPress={onRecord}>오늘 새 운동 추가</CTA>
+      <Text style={{ color: C.label2 }}>참여율 {wp.participation_rate}% · 계획 이행률 {wp.completion_rate}%</Text>
       {state === 'NO_PLAN' && (
         <>
           <Card pad={22}>
@@ -68,7 +71,7 @@ export default function Today({ data, loading, error, refresh, onRecord, goWeek 
       {(state === 'REVIEWED' || state === 'POST_WORKOUT' || state === 'WEEK_END') && state !== 'REST_DAY' && (
         <>
           <Hero color={w?.color || C.tint}>
-            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', opacity: 0.95 }}>✓ 오늘 완료 · {w?.label}</Text>
+            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', opacity: 0.95 }}>✓ 기록 저장됨 · {{ done: '계획대로 수행', partial: '부분 수행', substituted: '대체 훈련', missed: '미수행' }[session?.status] || '계획 연결 없음'}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 14 }}>
               <Text style={{ color: '#fff', fontSize: 50, fontWeight: '700', letterSpacing: -1.5 }}>
                 {(log?.distance_km ?? 0).toFixed(2)}</Text>
@@ -77,7 +80,7 @@ export default function Today({ data, loading, error, refresh, onRecord, goWeek 
             {log?.avg_pace && <Text style={{ color: 'rgba(255,255,255,0.92)', fontSize: 15, marginTop: 6 }}>
               {log.avg_pace} /km</Text>}
           </Hero>
-          {log?.review ? (
+          {log?.review && !log.review.is_stale ? (
             <Card style={{ backgroundColor: `${w?.color || C.tint}14` }}>
               <Text style={{ color: w?.color, fontSize: 13, fontWeight: '700', marginBottom: 6 }}>코치 분석</Text>
               <Text style={{ color: C.label, fontSize: 15, lineHeight: 23 }}>{log.review.coach_comment}</Text>

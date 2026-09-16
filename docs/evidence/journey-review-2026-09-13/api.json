@@ -1,0 +1,16 @@
+{
+  "cached_external_activity": {
+    "before_prediction": "4:52:15",
+    "after_prediction": "4:52:15",
+    "after_week_km": 0
+  },
+  "partial_run_status": "done",
+  "same_day_second_run": {
+    "same_id": true,
+    "created": false,
+    "stored_count": 1,
+    "stored_km": 8.0
+  },
+  "review_status": 200,
+  "next_plan_history_context": "## 최근 훈련 기록 (최신순)\n- 2026-09-13 이지 런 · 8.0km"
+}

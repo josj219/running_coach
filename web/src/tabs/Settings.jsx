@@ -336,7 +336,7 @@ function EditField({ label, value, onChange, placeholder, mode = 'text', maxLeng
   );
 }
 
-export default function Settings({ theme, setTheme, accent, setAccent }) {
+export default function Settings({ theme, setTheme, accent, setAccent, onChanged }) {
   const [profile, setProfile] = useState(null);
   const [goal, setGoal] = useState(null);
   const [settings, setSettings] = useState(null);
@@ -388,16 +388,17 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
       career_years: parseFloat(form.career_years) || null,
       height_cm: parseFloat(form.height_cm) || null, weight_kg: parseFloat(form.weight_kg) || null,
       pb_10k: form.pb_10k || null, pb_half: form.pb_half || null, pb_full: form.pb_full || null,
+      ...Object.fromEntries(["pb_10k_date", "pb_half_date", "pb_full_date"].map((k) => [k, form[k] || null])),
       avatar_url: form.avatar_url || null,
     });
-    setEditing(null); setAvatarErr(null); load();
+    setEditing(null); setAvatarErr(null); load(); onChanged?.();
   };
   const saveGoal = async () => {
     await api.putGoal({
       race_type: form.race_type || '풀마라톤', target_time: form.target_time || null,
       target_date: form.target_date || null, description: form.description || null,
     });
-    setEditing(null); load();
+    setEditing(null); load(); onChanged?.();
   };
 
   const patchSetting = async (k, v) => {
@@ -457,6 +458,7 @@ export default function Settings({ theme, setTheme, accent, setAccent }) {
                 <TimeInput label="10K PB" value={form.pb_10k} onChange={(v) => setForm({ ...form, pb_10k: v })} />
                 <TimeInput label="하프 PB" value={form.pb_half} onChange={(v) => setForm({ ...form, pb_half: v })} />
                 <TimeInput label="풀 PB" value={form.pb_full} onChange={(v) => setForm({ ...form, pb_full: v })} />
+                {[['pb_10k_date', '10K'], ['pb_half_date', '하프'], ['pb_full_date', '풀']].map(([key, label]) => <label key={key}>{label} PB 달성일 (모르면 비워두세요)<input type="date" aria-label={`${label} PB 달성일`} value={form[key] || ''} max={new Date().toLocaleDateString('sv-SE')} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ width: '100%', padding: 12 }} /></label>)}
                 <CTA icon="Check" onClick={saveProfile}>저장</CTA>
               </div>
             ) : (

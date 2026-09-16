@@ -9,6 +9,9 @@ import { Banner, Card, CTA, Icon, MetricRow, Modal, RecoveryBadge } from './Ui.j
 
 const NORUN_PREFIX = '(달리기 기록 없음 — 직접 기록) ';
 
+// 계획 밖 기록에서 고를 수 있는 종류 — 달리기 계열만. 그 외는 '달리지 않았어요'로 적는다.
+const UNPLANNED_KINDS = ['easy', 'tempo', 'interval', 'long', 'race', 'strength', 'core', 'drill', 'mobility', 'other'];
+
 // 'YYYY-MM-DD' → '6월 18일 (목)' (로컬 기준 — Date(iso)의 UTC 파싱 하루 밀림 방지)
 function fmtDateLabel(iso) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -128,7 +131,7 @@ function ImageImport({ onExtract }) {
   );
 }
 
-function StravaImport({ onPick }) {
+function StravaImport({ onPick, logDate }) {
   const [state, setState] = useState('idle'); // idle | loading | list | empty | off
   const [items, setItems] = useState([]);
 
@@ -144,6 +147,7 @@ function StravaImport({ onPick }) {
       const byId = new Map();
       results.flatMap((r) => r.items).forEach((a) => { if (!byId.has(a.id)) byId.set(a.id, a); });
       const merged = [...byId.values()]
+        .filter((a) => !a.imported && a.start_date && localISO(new Date(a.start_date)) === logDate)
         .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''))
         .slice(0, 3);
       if (!merged.length) { setState('empty'); return; }
@@ -198,8 +202,17 @@ function previewFromStream(raw) {
   return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 }
 
-export default function RecordSheet({ session, logDate, existingLog, onClose }) {
-  const w = wmeta(session?.kind || 'easy');
+export default function RecordSheet({ session, logDate, existingLog, prefill, onClose }) {
+  // 계획 세션이 있으면 그 종류를 따르고, 계획 밖 기록은 사용자가 고른다(기본 이지 런).
+  const [kind, setKind] = useState(existingLog?.kind || session?.kind || 'easy');
+  const [sport, setSport] = useState(existingLog?.sport || (['easy', 'tempo', 'interval', 'long', 'race'].includes(existingLog?.kind || session?.kind || 'easy') ? 'running' : 'unknown'));
+  const [fulfillment, setFulfillment] = useState(existingLog?.fulfillment || '');
+  const [comparisonTag, setComparisonTag] = useState(existingLog?.comparison_tag || '');
+  const [changeReason, setChangeReason] = useState('기록 정정');
+  const [taskSaved, setTaskSaved] = useState(false);
+  const [savedStatus, setSavedStatus] = useState(null);
+  const requestId = useRef(crypto.randomUUID());
+  const w = wmeta(kind);
   const dateLabel = fmtDateLabel(logDate);
   const isToday = logDate === localISO();
   // 선택된 일자에 이미 기록이 있으면 그 값으로 프리필(수정), 없으면 빈 폼(신규)
@@ -220,7 +233,7 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
   const [streamText, setStreamText] = useState('');
   const [review, setReview] = useState(null);
   const [source, setSource] = useState(existingLog?.source || 'manual');
-  const [externalId, setExternalId] = useState(null);
+  const [externalId, setExternalId] = useState(existingLog?.external_id || null);
   // 연동/사진으로 값을 채우면 위쪽 가져오기 영역을 접는다 ('다시 고르기'로 복원)
   const [imported, setImported] = useState(false);
 
@@ -236,6 +249,7 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
     setForm((p) => ({ ...p, distance: String(a.distance_km ?? ''), minutes: String(min), seconds: String(sec),
       pace: a.avg_pace || '', avgHr: a.avg_hr ? String(a.avg_hr) : '', maxHr: a.max_hr ? String(a.max_hr) : '',
       cadence: a.cadence ? String(a.cadence) : '' }));
+    setSport('running');
     setSource(a.provider || 'strava');
     setExternalId(a.external_id);
     setDetailOpen(true);
@@ -244,6 +258,13 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
 
   // 가져오기 영역 복원 — 채운 값은 유지하고 목록만 다시 노출
   const resetImport = () => { setImported(false); setSource('manual'); setExternalId(null); };
+
+  // 계획에 없던 훈련: 목록에서 고른 연동 활동으로 열렸다면 그 값으로 시작한다.
+  // 마운트 1회만 — 이후 '다시 고르기'로 사용자가 직접 바꿀 수 있어야 한다.
+  const prefilledRef = useRef(false);
+  useEffect(() => {
+    if (prefill && !prefilledRef.current) { prefilledRef.current = true; pickActivity(prefill); }
+  }, [prefill]);
 
   // 이미지 분석 결과로 폼 채움 — 인식 안 된 값(null)은 기존 입력 유지
   const fillFromExtract = (d) => {
@@ -271,7 +292,11 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
     try {
       const body = {
         log_date: logDate,
-        kind: session?.kind || 'easy',
+        kind, sport, fulfillment: fulfillment || (noRun ? 'missed' : null),
+        comparison_tag: comparisonTag || null,
+        change_reason: changeReason, expected_revision: existingLog?.revision,
+        client_request_id: requestId.current,
+        ...(session ? { session_id: session.id } : {}),
         distance_km: noRun ? 0 : (parseFloat(form.distance) || 0),
         duration_sec: noRun ? null : parseTimeToSec(form.minutes, form.seconds),
         avg_pace: noRun ? null : (form.pace || null),
@@ -286,7 +311,8 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
           ? `${NORUN_PREFIX}${form.note}` : (form.note || null),
         source, external_id: externalId,
       };
-      const res = await api.saveLog(body);
+      const res = existingLog?.id ? await api.patchLog(existingLog.id, body) : await api.saveLog(body);
+      setSavedStatus(res.session_status);
       setLogId(res.id);
       setPhase('review');
       startReview(res.id);
@@ -312,7 +338,7 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
 
   return (
     <Modal
-      title={phase === 'review' ? 'AI 코치 분석' : phase === 'saving' ? '저장 중…' : '훈련 기록'}
+      title={phase === 'review' ? 'AI 코치 분석' : phase === 'saving' ? '저장 중…' : existingLog?.id ? '이 기록 수정' : '새 운동 기록'}
       subtitle={isToday
         ? (session?.title || '오늘 훈련')
         : `${dateLabel}${session?.title ? ` · ${session.title}` : ''}`}
@@ -331,6 +357,7 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
 
       {phase === 'review' && (
         <div style={{ padding: '18px 20px 24px' }}>
+          <Banner tone="info">기록 저장됨 · 계획 상태: {{ done: '계획대로 수행', partial: '부분 수행', missed: '미수행', substituted: '대체 훈련' }[savedStatus] || '계획 연결 없음'}</Banner>
           {hasMetrics && (
             <Card style={{ marginBottom: 14 }}>
               <MetricRow size={24} items={[
@@ -387,13 +414,17 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
           </Card>
           {error && <div style={{ marginBottom: 14 }}>
             <Banner tone="error" action="재시도" onAction={() => startReview(logId)}>{error}</Banner></div>}
+          {review?.improvements && <CTA variant="tinted" disabled={taskSaved} onClick={async () => {
+            try { await api.addTask({ source_log_id: logId, proposal: review.improvements }); setTaskSaved(true); }
+            catch (e) { setError(e.message); }
+          }}>{taskSaved ? '다음 계획 과제로 저장됨' : '이 개선점을 다음 계획 과제로 선택'}</CTA>}
           <CTA onClick={() => onClose(true)} icon="Check">확인</CTA>
         </div>
       )}
 
       {phase === 'form' && (
         <div style={{ padding: '16px 20px 24px' }}>
-          {!noRun && !imported && <StravaImport onPick={pickActivity} />}
+          {!existingLog && !noRun && !imported && <StravaImport onPick={pickActivity} logDate={logDate} />}
           {!noRun && !imported && <ImageImport onExtract={fillFromExtract} />}
           {!noRun && imported && (
             <div style={{ marginBottom: 4 }}>
@@ -401,6 +432,19 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
                 {source === 'image' ? '이미지에서 값을 채웠어요.' : '연동 기록을 불러왔어요.'} 숫자를 확인하고 저장하세요.</Banner></div>
           )}
 
+          {existingLog?.review?.is_stale && <Banner tone="warn">기록 수정으로 이전 리뷰의 갱신이 필요합니다.</Banner>}
+          <FieldLabel>실제 운동 종목</FieldLabel>
+          <select aria-label="실제 운동 종목" value={sport} onChange={(e) => setSport(e.target.value)} style={{ width: '100%', padding: 12, borderRadius: 10 }}>
+            <option value="running">러닝</option><option value="cycling">사이클</option><option value="strength">근력</option><option value="other">기타 종목</option><option value="unknown">아직 확인 안 됨</option>
+          </select>
+          <FieldLabel>계획 수행 확인</FieldLabel>
+          <select aria-label="계획 수행 확인" value={fulfillment} onChange={(e) => setFulfillment(e.target.value)} style={{ width: '100%', padding: 12, borderRadius: 10 }}>
+            <option value="">거리·시간 기준 자동 판정</option><option value="partial">부분 수행</option><option value="done">계획대로 수행</option><option value="substituted">대체 훈련</option><option value="missed">미수행</option>
+          </select>
+          <small>계획 거리 또는 시간의 90% 이상을 수행하면 계획대로 수행으로 집계합니다. 참여율은 부분·대체 수행도 포함합니다. 수치가 없는 훈련은 확인 선택을 사용합니다.</small>
+          <FieldLabel>비교 조건 (선택)</FieldLabel>
+          <input aria-label="비교 조건" value={comparisonTag} onChange={(e) => setComparisonTag(e.target.value)} placeholder="예: 한강 같은 코스 · 평지 · 선선함" style={{ width: '100%', padding: 12 }} />
+          {existingLog && <><FieldLabel>수정 사유</FieldLabel><input aria-label="수정 사유" value={changeReason} onChange={(e) => setChangeReason(e.target.value)} style={{ width: '100%', padding: 12 }} /></>}
           {/* 달리기 기록이 없는 날 — 수치 입력 없이 소감 기반으로 기록 */}
           <button onClick={() => setNoRun(!noRun)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: noRun ? 0 : 12,
@@ -416,6 +460,28 @@ export default function RecordSheet({ session, logDate, existingLog, onClose }) 
               <div style={{ fontSize: 13, color: 'var(--label-secondary)' }}>거리·시간 없이, 아래에 한 일을 적어 기록해요</div>
             </div>
           </button>
+
+          {/* 계획에 없던 훈련 — 어떤 종류였는지는 계획이 알려주지 않으니 여기서 고른다 */}
+          {!noRun && (
+            <>
+              <FieldLabel>훈련 종류</FieldLabel>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {UNPLANNED_KINDS.map((k) => {
+                  const m = wmeta(k);
+                  const on = kind === k;
+                  return (
+                    <button key={k} onClick={() => setKind(k)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 13px', borderRadius: 12,
+                        border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                        color: on ? '#fff' : 'var(--label-primary)',
+                        background: on ? m.color : 'var(--fill-tertiary)' }}>
+                      <Icon name={m.icon} size={15} color={on ? '#fff' : m.color} />{m.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           {!noRun && (
             <>

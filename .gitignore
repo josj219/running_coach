@@ -7,3 +7,12 @@ node_modules/
 .next/
 web/node_modules/
 api/.venv/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+.pytest_cache/
+web/dist/
+*.dump
+*.sql.gz
+.env.*

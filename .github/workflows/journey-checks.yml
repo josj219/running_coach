@@ -1,0 +1,60 @@
+name: journey-checks
+on:
+  push:
+    branches: [journey-implementation]
+  workflow_dispatch: {}
+  workflow_call: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: coach
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: coach_test
+        ports: [5432:5432]
+        options: --health-cmd "pg_isready -U coach -d coach_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install API dependencies
+        run: pip install -r api/requirements.txt -r api/requirements-test.txt
+      - name: SQLite acceptance and migration recovery tests
+        working-directory: api
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest
+      - name: PostgreSQL 16 acceptance and regression tests
+        working-directory: api
+        env:
+          COACH_TEST_DATABASE_URL: postgresql+asyncpg://coach:test-only-password@127.0.0.1:5432/coach_test
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest
+      - name: Frontend build and Expo contract
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          node e2e/mobile-contract.mjs
+          npx playwright install --with-deps chromium
+      - name: Browser journeys
+        run: |
+          cd api
+          DATABASE_URL=sqlite+aiosqlite:////tmp/coach-journey-ci.db COACH_MOCK=1 SEED_DEMO=1 TZ=Asia/Seoul python -m uvicorn app.main:app --host 127.0.0.1 --port 18113 > /tmp/coach-api.log 2>&1 &
+          cd ../web
+          VITE_API_URL=http://127.0.0.1:18113 npm run dev -- --host 127.0.0.1 --port 15173 --strictPort > /tmp/coach-web.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:15173/api/health; then break; fi
+            sleep 1
+          done
+          E2E_PYTHON=python E2E_DATABASE_URL=sqlite+aiosqlite:////tmp/coach-journey-ci.db E2E_CHANNEL=chromium E2E_OUT=/tmp/coach-journey-e2e node e2e/journey.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: journey-browser-evidence
+          path: /tmp/coach-journey-e2e

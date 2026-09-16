@@ -3,9 +3,9 @@ import React, { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { api } from '../api';
 import { C, wmeta } from '../theme';
-import { Banner, Card, Loading, RecoveryBadge, SectionLabel } from '../ui';
+import { Banner, Card, CTA, Loading, RecoveryBadge, SectionLabel } from '../ui';
 
-export default function History() {
+export default function History({ onEdit, reloadKey }) {
   const [stats, setStats] = useState(null);
   const [logs, setLogs] = useState(null);
   const [error, setError] = useState(null);
@@ -17,7 +17,7 @@ export default function History() {
         setStats(s.weeks); setLogs(l.items);
       } catch (e) { setError(e.message); }
     })();
-  }, []);
+  }, [reloadKey]);
 
   if (error) return <View style={{ padding: 16 }}><Banner tone="error">{error}</Banner></View>;
   if (!stats || !logs) return <Loading label="불러오는 중…" />;
@@ -71,6 +71,9 @@ export default function History() {
                     </Text>
                     <Text style={{ color: C.label2, fontSize: 13, marginTop: 1 }}>
                       {log.log_date.slice(5).replace('-', '/')} · {w.label}</Text>
+                    {log.quality?.reason && <Text style={{ color: C.label2 }}>추정 제외: {log.quality.reason}</Text>}
+                    {log.review?.is_stale && <Text style={{ color: C.label2 }}>리뷰 갱신 필요</Text>}
+                    <CTA variant="gray" onPress={() => onEdit(log)}>이 기록 수정</CTA>
                   </View>
                   {log.review && <RecoveryBadge level={log.review.recovery} />}
                 </View>

@@ -154,7 +154,7 @@ async def sync_activities(db: AsyncSession, integ: Integration, user_id: int, li
             continue
         ext_id = str(a["activityId"])
         existing = (await db.execute(select(ExternalActivity).where(
-            ExternalActivity.provider == "garmin",
+            ExternalActivity.user_id == user_id, ExternalActivity.provider == "garmin",
             ExternalActivity.external_id == ext_id,
         ))).scalar_one_or_none()
         if existing:
@@ -168,6 +168,7 @@ async def sync_activities(db: AsyncSession, integ: Integration, user_id: int, li
         ))
         added += 1
     integ.auth_blob = new_blob
+    integ.last_sync_error = None
     integ.last_sync_at = datetime.now(timezone.utc)
     await db.commit()
     return added

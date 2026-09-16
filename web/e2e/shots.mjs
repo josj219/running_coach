@@ -8,8 +8,20 @@ const BASE = 'http://localhost:5173';
 
 const SCENARIO = process.env.SCENARIO || 'main'; // main | noplan
 
-const browser = await chromium.launch();
+// 로그인 — 데모 계정(SEED_DEMO=1) 토큰을 받아 localStorage 에 심는다(앱은 auth_token 키를 읽는다)
+const EMAIL = process.env.E2E_EMAIL || 'demo@coach.local';
+const PASSWORD = process.env.E2E_PASSWORD || 'demo-pass-1234';
+const loginRes = await fetch(`${BASE}/api/auth/login`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+});
+if (!loginRes.ok) { console.error('login failed', loginRes.status, await loginRes.text()); process.exit(1); }
+const { token } = await loginRes.json();
+
+// E2E_CHANNEL=chrome 이면 시스템 Chrome 사용(번들 브라우저 미설치 환경)
+const browser = await chromium.launch(process.env.E2E_CHANNEL ? { channel: process.env.E2E_CHANNEL } : {});
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+await page.addInitScript((t) => { localStorage.setItem('auth_token', t); }, token);
 page.on('console', (m) => m.type() === 'error' && console.log('CONSOLE ERROR:', m.text()));
 page.on('pageerror', (e) => console.log('PAGE ERROR:', e.message));
 
@@ -30,7 +42,7 @@ if (SCENARIO === 'noplan') {
   // 닫은 주에는 다시 안 뜨는지: 새로고침 후 시트 미노출
   await page.goto(BASE);
   await page.waitForTimeout(1500);
-  await shot('n4-today-after');
+  await shot('n4-home-after');
   await browser.close();
   console.log('done(noplan) →', OUT);
   process.exit(0);
@@ -38,6 +50,11 @@ if (SCENARIO === 'noplan') {
 
 await page.goto(BASE);
 await page.waitForTimeout(1800);
+await shot('00-home-dark');  // 첫 화면 = 홈 대시보드
+await page.getByText('근거 보기').click();
+await page.waitForTimeout(400);
+await shot('00b-home-basis');
+await tab('오늘');
 await shot('01-today-dark');
 
 // 당일 AI 카드 생성 (컨디션 칩 → 생성)
@@ -76,8 +93,8 @@ if (await recordBtn.count()) {
 
 await tab('이번 주');
 await shot('07-week');
-await tab('기록');
-await shot('08-history');
+await tab('홈');
+await shot('08-home-after');
 await tab('설정');
 await shot('09-settings-dark');
 
@@ -95,6 +112,8 @@ await page.waitForTimeout(400);
 await shot('10-settings-light');
 await tab('오늘');
 await shot('11-today-light');
+await tab('홈');
+await shot('12-home-light');
 
 await browser.close();
 console.log('done →', OUT);

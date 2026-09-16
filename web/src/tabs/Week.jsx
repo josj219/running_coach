@@ -7,21 +7,20 @@ import {
   Banner, Card, CTA, Icon, MetricRow, Modal, NavBarLarge, Ring, SectionLabel, Spinner,
 } from '../components/Ui.jsx';
 import Markdown from '../components/Markdown.jsx';
+import { CoachingTasks, fulfillmentLabel } from '../components/JourneyPanels.jsx';
 
 const STATUS_META = {
-  done:    { icon: 'CircleCheck', color: 'var(--accent-green)', label: '완료' },
-  partial: { icon: 'CircleAlert', color: 'var(--accent-orange)', label: '부분완료' },
+  substituted: { icon: 'CircleAlert', color: 'var(--accent-orange)', label: '대체 훈련' },
+  done:    { icon: 'CircleCheck', color: 'var(--accent-green)', label: '계획대로 수행' },
+  partial: { icon: 'CircleAlert', color: 'var(--accent-orange)', label: '부분 수행' },
   missed:  { icon: 'CircleX', color: 'var(--accent-red)', label: '미수행' },
   planned: { icon: 'Circle', color: 'var(--label-tertiary)', label: '예정' },
 };
 
 // 기록된 세션의 실측 요약 (거리·페이스). 없으면 '완료'/'직접 기록'.
 function loggedSubtitle(s) {
-  const parts = [
-    s.log.distance_km ? `${s.log.distance_km}km` : null,
-    s.log.avg_pace ? `${s.log.avg_pace}/km` : null,
-  ].filter(Boolean);
-  return `기록됨 · ${parts.join(' · ') || (s.is_rest ? '직접 기록' : '완료')}`;
+  return `기록 ${s.logs?.length || 1}건 · ${fulfillmentLabel(s.status)} · 실제 ${s.actual_distance_km ?? s.log.distance_km}km / 계획 ${s.distance_km || '—'}km`;
+
 }
 
 // 계획 소요시간 표기 — "30분" / "30~35분"
@@ -70,10 +69,10 @@ function PlanDetail({ s }) {
     // 기록됨 → 계획 → 실제 비교
     const l = s.log;
     const cmp = [
-      ['거리', s.distance_km ? `${s.distance_km}km` : '—', l.distance_km ? `${l.distance_km}km` : '—'],
+      ['거리', s.distance_km ? `${s.distance_km}km` : '—', `${s.actual_distance_km ?? l.distance_km}km`],
       ['페이스', s.target_pace || '—', l.avg_pace ? `${l.avg_pace}/km` : '—'],
     ];
-    if (dur || l.duration_sec) cmp.push(['시간', dur || '—', fmtDuration(l.duration_sec) || '—']);
+    if (dur || l.duration_sec) cmp.push(['시간', dur || '—', `${s.actual_duration_min ?? (l.duration_sec / 60)}분`]);
     return (
       <>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--label-tertiary)', textAlign: 'right',
@@ -244,7 +243,7 @@ function GrowthReport({ ev }) {
         <MetricRow size={24} items={[
           { value: ev.total_km, unit: 'km', label: '주간 거리' },
           { value: `${ev.done_sessions}/${ev.total_sessions}`, label: '세션' },
-          { value: `${ev.completion_rate}%`, label: '수행률' },
+          { value: `${ev.completion_rate}%`, label: '계획 이행률' },
         ]} />
         {ev.coach_message && (
           <div style={{ fontSize: 14.5, lineHeight: 1.55, color: 'var(--label-primary)', marginTop: 14,
@@ -295,8 +294,7 @@ export default function Week({ refreshToday, onPlan, onRecord, reloadKey = 0 }) 
 
   // 동그라미 탭 — 이미 기록됨은 바로 수정, 미기록은 확인 후 기록
   const handleCircle = (s) => {
-    if (s.log) onRecord?.(s);
-    else setConfirmRec(s);
+    setConfirmRec(s);
   };
 
   if (loading) return <div><NavBarLarge title="이번 주" /><Spinner label="불러오는 중…" /></div>;
@@ -314,6 +312,7 @@ export default function Week({ refreshToday, onPlan, onRecord, reloadKey = 0 }) 
 
         {week && (
           <>
+            <CoachingTasks tasks={week.coaching_tasks} refresh={load} />
             {week.direction && (
               <Card pad={16} style={{ background: 'color-mix(in srgb, var(--tint) 8%, var(--bg-grouped-secondary))', boxShadow: 'none' }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -336,7 +335,7 @@ export default function Week({ refreshToday, onPlan, onRecord, reloadKey = 0 }) 
                       / {wp.goal_km ?? '—'} km</span>
                   </div>
                   <div style={{ fontSize: 13.5, color: 'var(--label-secondary)', marginTop: 4 }}>
-                    완료 {wp.done}/{wp.total} 세션</div>
+                    계획대로 {wp.done}/{wp.total} · 참여율 {wp.participation_rate}%</div>
                 </div>
               </div>
             </Card>
@@ -357,7 +356,10 @@ export default function Week({ refreshToday, onPlan, onRecord, reloadKey = 0 }) 
               </Card>
             </div>
 
-            {week.evaluation?.coach_message && <GrowthReport ev={week.evaluation} />}
+            {week.evaluation?.coach_message && <>
+              <GrowthReport ev={week.evaluation} />
+              <CTA variant="gray" onClick={async () => { try { await api.addTask({ source_plan_id: week.id, proposal: week.evaluation.coach_message }); await load(); } catch (e) { setError(e.message); } }}>이 평가를 다음 계획 과제로 선택</CTA>
+            </>}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 8 }}>
               <CTA variant="tinted" icon="Sparkles" busy={evalBusy} onClick={async () => {
@@ -389,13 +391,14 @@ export default function Week({ refreshToday, onPlan, onRecord, reloadKey = 0 }) 
           onClose={() => setConfirmRec(null)}>
           <div style={{ padding: '18px 20px 22px' }}>
             <div style={{ fontSize: 15.5, lineHeight: 1.5, color: 'var(--label-primary)', marginBottom: 18 }}>
-              이 날 훈련을 지금 기록할까요? 거리·시간·소감을 입력하면 코치가 분석해 줘요.</div>
+              새 운동 추가와 기존 기록 수정을 선택하세요.</div>
+            {(confirmRec.logs || []).map((log) => <CTA key={log.id} variant="gray" onClick={() => { const s = { ...confirmRec, log }; setConfirmRec(null); onRecord?.(s); }}>운동 #{log.id} · {log.distance_km}km · 이 기록 수정</CTA>)}
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}>
                 <CTA variant="gray" icon={null} onClick={() => setConfirmRec(null)}>취소</CTA></div>
               <div style={{ flex: 1 }}>
-                <CTA icon="Pencil" onClick={() => { const s = confirmRec; setConfirmRec(null); onRecord?.(s); }}>
-                  기록하기</CTA></div>
+                <CTA icon="Pencil" onClick={() => { const s = { ...confirmRec, log: null }; setConfirmRec(null); onRecord?.(s); }}>
+                  새 운동 추가</CTA></div>
             </div>
           </div>
         </Modal>
