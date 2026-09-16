@@ -17,8 +17,8 @@
 - [x] J09 생성 후 컨디션 변경·변경 전후 확인 및 적용
 - [x] Expo API 계약 영향 처리
 - [x] 회귀 테스트·프런트 빌드·주요 브라우저 여정 검증 (CI journey-checks 통과, 2026-09-16)
-- [ ] 운영 백업·복원 리허설·마이그레이션 검증
-- [ ] 커밋·푸시·운영 배포·배포 환경 핵심 동작 검증
+- [x] 운영 백업·복원 리허설·마이그레이션 검증 (deploy run 35103715293, 2026-09-16)
+- [x] 커밋·푸시·운영 배포·배포 환경 핵심 동작 검증 (revision 8c52ae7, 2026-09-16)
 
 ## 결정
 
@@ -75,3 +75,12 @@ J01~J10 구현을 로컬 검증했다. 다음 단계는 최신 수정의 전체 
 - 2차 CI(run 35103001605) 전체 통과: SQLite·PostgreSQL 16 회귀, PWA 빌드, Expo 계약, Chrome 여정.
 - 커밋: `521eb68`(구현 통합), `d62dc57`(CI 수정). 브랜치 `journey-implementation` 원격 푸시 완료. self-hosted runner 온라인 확인.
 - 다음: main 병합 → deploy 워크플로우(checks 재실행 → 백업·복원 리허설·마이그레이션 검증·스모크) → `https://coach.gogojo.cloud/api/health`의 `revision` 확인.
+
+## 2026-09-16 운영 배포 완료
+
+- main fast-forward(`bc41359` → `8c52ae7`) 푸시 → deploy run `35103715293` 성공 (checks 재통과 후 self-hosted runner 실행).
+- 복원 리허설·실제 마이그레이션 검증 모두 `passed`, idempotent. 기존 행 보존 확인: users 1, weekly_plans 6, sessions 43, daily_plans 15, workout_logs 9, workout_reviews 9, external_activities 13, integrations 1, goals 1, availability_slots 3.
+- 운영 스모크 `passed`: nginx-to-api, login, PB-only, same-day-add, edit, partial, goal-history, cross-provider-import, import-idempotency, growth. 임시 계정·기록 제거 확인.
+- 공개 URL: `https://coach.gogojo.cloud/api/health` → `{"status":"ok","revision":"8c52ae7…"}`, 웹 루트 HTTP 200.
+- 복구 자료: 서버 `/home/ubuntu/coach-backups/deploy-20260916T134521Z` (coach.dump + sha256, images.txt, 검증 JSON).
+- 미검증(사용자 실사용으로 확인 필요): 실제 Garmin/Strava 로그인·동기화, 실제 LLM 응답 품질, Expo 실기기.
